@@ -1,0 +1,50 @@
+import { prisma } from '@/lib/prisma';
+import { summarizePlan, toNumber } from '@/lib/business-plan-engine';
+import { PlanSchema } from '@/lib/schemas';
+import { writeAuditLog } from '@/lib/auth';
+
+function withSummary(plan: any) {
+  return {
+    ...plan,
+    summary: summarizePlan(plan.activities.map((a: any) => ({
+      estimatedCost: toNumber(a.estimatedCost.toString()),
+      recurrentBudget: toNumber(a.recurrentBudget.toString()),
+      q1: a.q1,
+      q2: a.q2,
+      q3: a.q3,
+      q4: a.q4
+    })))
+  };
+}
+
+export async function GET() {
+  const plans = await prisma.businessPlan.findMany({
+    include: { activities: { orderBy: { sortOrder: 'asc' } } },
+    orderBy: { updatedAt: 'desc' }
+  });
+
+  return Response.json(plans.map(withSummary));
+}
+
+export async function POST(request: Request) {
+  const parsed = PlanSchema.parse(await request.json());
+
+  const plan = await prisma.businessPlan.create({
+    data: {
+      title: parsed.title,
+      organization: parsed.organization,
+      facility: parsed.facility,
+      costCenter: parsed.costCenter,
+      costCenterName: parsed.costCenterName,
+      year: parsed.year,
+      ceilingAmount: parsed.ceilingAmount,
+      activities: {
+        create: parsed.activities.map((a, index) => ({ ...a, sortOrder: a.sortOrder || index + 1 }))
+      }
+    },
+    include: { activities: { orderBy: { sortOrder: 'asc' } } }
+  });
+
+  await writeAuditLog({ businessPlanId: plan.id, action: 'PLAN_CREATED', details: `Created ${plan.title}` });
+  return Response.json(withSummary(plan), { status: 201 });
+}

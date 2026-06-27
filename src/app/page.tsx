@@ -1,0 +1,426 @@
+'use client';
+
+import { FormEvent, ChangeEvent, useEffect, useMemo, useState } from 'react';
+import { allocateMonthly, formatVatu, MONTHS, summarizePlan } from '@/lib/business-plan-engine';
+
+type Status = 'DRAFT' | 'REVIEW' | 'APPROVED' | 'SUBMITTED';
+
+type ActivityInput = {
+  subProgram: string;
+  corporatePlanKeyActivity: string;
+  outputOrServiceTarget: string;
+  targetForYear: string;
+  responsibility: string;
+  activityNumber: string;
+  activityDescription: string;
+  jobCode: string;
+  expenditureDescription: string;
+  estimatedCost: number;
+  recurrentBudget: number;
+  developmentPartners: number;
+  q1: boolean;
+  q2: boolean;
+  q3: boolean;
+  q4: boolean;
+  funding: string;
+  budgetCategory: string;
+  accountCode: string;
+  sortOrder: number;
+};
+
+type Plan = {
+  id: string;
+  title: string;
+  organization: string;
+  year: number;
+  facility: string;
+  costCenter: string;
+  costCenterName: string;
+  ceilingAmount: string | number;
+  status: Status;
+  updatedAt?: string;
+  activities: ActivityInput[];
+  summary?: ReturnType<typeof summarizePlan>;
+};
+
+type AuditLog = {
+  id: string;
+  action: string;
+  details: string;
+  createdAt: string;
+  user?: { name: string; email: string } | null;
+};
+
+const emptyActivity = (sortOrder: number): ActivityInput => ({
+  subProgram: 'Management & Administration',
+  corporatePlanKeyActivity: '',
+  outputOrServiceTarget: '',
+  targetForYear: '',
+  responsibility: '',
+  activityNumber: `RB${String(sortOrder).padStart(2, '0')}`,
+  activityDescription: '',
+  jobCode: '611180 VCH Administration',
+  expenditureDescription: '',
+  estimatedCost: 0,
+  recurrentBudget: 0,
+  developmentPartners: 0,
+  q1: true,
+  q2: true,
+  q3: true,
+  q4: true,
+  funding: 'Recurrent',
+  budgetCategory: 'Operations',
+  accountCode: '',
+  sortOrder
+});
+
+function normalizeActivity(activity: any, index: number): ActivityInput {
+  return {
+    subProgram: activity.subProgram || '',
+    corporatePlanKeyActivity: activity.corporatePlanKeyActivity || '',
+    outputOrServiceTarget: activity.outputOrServiceTarget || '',
+    targetForYear: activity.targetForYear || '',
+    responsibility: activity.responsibility || '',
+    activityNumber: activity.activityNumber || `RB${String(index + 1).padStart(2, '0')}`,
+    activityDescription: activity.activityDescription || '',
+    jobCode: activity.jobCode || '',
+    expenditureDescription: activity.expenditureDescription || '',
+    estimatedCost: Number(activity.estimatedCost || 0),
+    recurrentBudget: Number(activity.recurrentBudget || activity.estimatedCost || 0),
+    developmentPartners: Number(activity.developmentPartners || 0),
+    q1: Boolean(activity.q1),
+    q2: Boolean(activity.q2),
+    q3: Boolean(activity.q3),
+    q4: Boolean(activity.q4),
+    funding: activity.funding || 'Recurrent',
+    budgetCategory: activity.budgetCategory || 'Operations',
+    accountCode: activity.accountCode || '',
+    sortOrder: Number(activity.sortOrder || index + 1)
+  };
+}
+
+export default function HomePage() {
+  const [plans, setPlans] = useState<Plan[]>([]);
+  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
+  const [status, setStatus] = useState<Status>('DRAFT');
+  const [title, setTitle] = useState('VNH ED 2026 Business Plan');
+  const [organization, setOrganization] = useState('Ministry of Health');
+  const [year, setYear] = useState(2026);
+  const [facility, setFacility] = useState('Vila Central Hospital');
+  const [costCenter, setCostCenter] = useState('61RB');
+  const [costCenterName, setCostCenterName] = useState('Vila Central Hospital');
+  const [ceilingAmount, setCeilingAmount] = useState(283739303);
+  const [activities, setActivities] = useState<ActivityInput[]>([emptyActivity(1)]);
+  const [message, setMessage] = useState('');
+  const [importing, setImporting] = useState(false);
+
+  async function refresh() {
+    setLoading(true);
+    const res = await fetch('/api/plans', { cache: 'no-store' });
+    const data = await res.json();
+    setPlans(data);
+    setLoading(false);
+  }
+
+  useEffect(() => { refresh(); }, []);
+
+  const summary = useMemo(() => summarizePlan(activities), [activities]);
+  const selectedPlan = useMemo(() => plans.find((plan) => plan.id === selectedPlanId), [plans, selectedPlanId]);
+
+  function updateActivity(index: number, patch: Partial<ActivityInput>) {
+    setActivities((current) => current.map((activity, i) => i === index ? { ...activity, ...patch } : activity));
+  }
+
+  function addActivity() {
+    setActivities((current) => [...current, emptyActivity(current.length + 1)]);
+  }
+
+  function removeActivity(index: number) {
+    setActivities((current) => current.filter((_, i) => i !== index).map((a, i) => ({ ...a, sortOrder: i + 1 })));
+  }
+
+  function clearForm() {
+    setSelectedPlanId(null);
+    setStatus('DRAFT');
+    setTitle('VNH ED 2026 Business Plan');
+    setOrganization('Ministry of Health');
+    setYear(2026);
+    setFacility('Vila Central Hospital');
+    setCostCenter('61RB');
+    setCostCenterName('Vila Central Hospital');
+    setCeilingAmount(283739303);
+    setActivities([emptyActivity(1)]);
+    setAuditLogs([]);
+    setMessage('New draft ready.');
+  }
+
+  async function loadPlan(planId: string) {
+    const res = await fetch(`/api/plans/${planId}`, { cache: 'no-store' });
+    if (!res.ok) {
+      setMessage('Could not load that plan.');
+      return;
+    }
+    const plan: Plan = await res.json();
+    setSelectedPlanId(plan.id);
+    setStatus(plan.status);
+    setTitle(plan.title);
+    setOrganization(plan.organization || 'Ministry of Health');
+    setYear(Number(plan.year));
+    setFacility(plan.facility);
+    setCostCenter(plan.costCenter);
+    setCostCenterName(plan.costCenterName);
+    setCeilingAmount(Number(plan.ceilingAmount || 0));
+    setActivities((plan.activities || []).map(normalizeActivity));
+    setMessage(`Loaded ${plan.title}.`);
+    await loadAudit(plan.id);
+  }
+
+  async function loadAudit(planId: string) {
+    const res = await fetch(`/api/plans/${planId}/audit`, { cache: 'no-store' });
+    if (res.ok) setAuditLogs(await res.json());
+  }
+
+  async function savePlan(event: FormEvent) {
+    event.preventDefault();
+    const cleanActivities = activities.map((activity, index) => ({ ...activity, sortOrder: index + 1 }));
+    setMessage(selectedPlanId ? 'Updating business plan...' : 'Saving business plan...');
+    const res = await fetch(selectedPlanId ? `/api/plans/${selectedPlanId}` : '/api/plans', {
+      method: selectedPlanId ? 'PUT' : 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title, organization, year, facility, costCenter, costCenterName, ceilingAmount, activities: cleanActivities })
+    });
+    if (!res.ok) {
+      setMessage('Could not save plan. Check required activity and expenditure descriptions.');
+      return;
+    }
+    const saved = await res.json();
+    setSelectedPlanId(saved.id);
+    setStatus(saved.status);
+    setMessage('Saved. Dashboard, audit history, and Excel export are ready.');
+    await refresh();
+    await loadAudit(saved.id);
+  }
+
+  async function changeStatus(nextStatus: Status) {
+    if (!selectedPlanId) {
+      setMessage('Save the plan first before changing approval status.');
+      return;
+    }
+    const res = await fetch(`/api/plans/${selectedPlanId}/status`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: nextStatus })
+    });
+    if (!res.ok) {
+      setMessage('Could not update status.');
+      return;
+    }
+    setStatus(nextStatus);
+    setMessage(`Status changed to ${nextStatus}.`);
+    await refresh();
+    await loadAudit(selectedPlanId);
+  }
+
+  async function importExcel(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setImporting(true);
+    setMessage('Importing Excel workbook...');
+    const formData = new FormData();
+    formData.append('file', file);
+    const res = await fetch('/api/import-excel', { method: 'POST', body: formData });
+    setImporting(false);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      setMessage(err.error || 'Import failed. Make sure this is a compatible 61RB workbook.');
+      return;
+    }
+    const imported = await res.json();
+    setSelectedPlanId(null);
+    setStatus('DRAFT');
+    setTitle(imported.title || title);
+    setYear(Number(imported.year || year));
+    setFacility(imported.facility || facility);
+    setCostCenter(imported.costCenter || costCenter);
+    setCostCenterName(imported.costCenterName || costCenterName);
+    setCeilingAmount(Number(imported.ceilingAmount || ceilingAmount));
+    setActivities((imported.activities || []).map(normalizeActivity));
+    setAuditLogs([]);
+    setMessage(`Imported ${imported.activities?.length || 0} activities. Review, then save as a new plan.`);
+    event.target.value = '';
+  }
+
+  async function deleteSelectedPlan() {
+    if (!selectedPlanId) return;
+    if (!confirm('Delete this saved business plan?')) return;
+    const res = await fetch(`/api/plans/${selectedPlanId}`, { method: 'DELETE' });
+    if (res.ok) {
+      clearForm();
+      await refresh();
+      setMessage('Plan deleted.');
+    }
+  }
+
+  return (
+    <main className="container">
+      <section className="hero">
+        <div>
+          <h1>Business Plan Tool</h1>
+          <p>
+            Build VNH-style annual business plans, edit saved plans, import existing Excel workbooks,
+            track approval status, audit changes, and export the corrected 61RB workbook.
+          </p>
+        </div>
+        <div className="hero-badges">
+          <span className={`badge status-${status.toLowerCase()}`}>{status}</span>
+          <span className={`badge ${summary.isBalanced ? 'good' : 'warn'}`}>{summary.isBalanced ? 'Balanced' : 'Needs review'}</span>
+        </div>
+      </section>
+
+      <section className="kpis">
+        <div className="kpi"><span>Total estimated cost</span><strong>{formatVatu(summary.totalEstimatedCost)}</strong></div>
+        <div className="kpi"><span>Recurrent budget</span><strong>{formatVatu(summary.totalRecurrentBudget)}</strong></div>
+        <div className="kpi"><span>Unfunded</span><strong>{formatVatu(summary.unfundedCost)}</strong></div>
+        <div className="kpi"><span>Cashflow total</span><strong>{formatVatu(summary.cashflowTotal)}</strong></div>
+      </section>
+
+      <section className="panel workflow-panel">
+        <div>
+          <h2>Workflow</h2>
+          <p className="muted">Current plan: {selectedPlan ? selectedPlan.title : 'Unsaved draft'}</p>
+        </div>
+        <div className="actions">
+          <button type="button" className="secondary" onClick={clearForm}>New plan</button>
+          {(['DRAFT', 'REVIEW', 'APPROVED', 'SUBMITTED'] as Status[]).map((s) => (
+            <button type="button" key={s} className={status === s ? '' : 'secondary'} onClick={() => changeStatus(s)}>{s}</button>
+          ))}
+          {selectedPlanId && <a className="button-link" href={`/api/plans/${selectedPlanId}/export`}>Download Excel</a>}
+          {selectedPlanId && <button type="button" className="danger" onClick={deleteSelectedPlan}>Delete</button>}
+        </div>
+      </section>
+
+      <form onSubmit={savePlan} className="grid">
+        <section className="panel">
+          <h2>Plan setup</h2>
+          <div className="grid cols-4">
+            <label>Title<input value={title} onChange={(e) => setTitle(e.target.value)} /></label>
+            <label>Organization<input value={organization} onChange={(e) => setOrganization(e.target.value)} /></label>
+            <label>Year<input type="number" value={year} onChange={(e) => setYear(Number(e.target.value))} /></label>
+            <label>Cost center<input value={costCenter} onChange={(e) => setCostCenter(e.target.value)} /></label>
+            <label>Ceiling amount<input type="number" value={ceilingAmount} onChange={(e) => setCeilingAmount(Number(e.target.value))} /></label>
+            <label>Facility<input value={facility} onChange={(e) => setFacility(e.target.value)} /></label>
+            <label>Cost center name<input value={costCenterName} onChange={(e) => setCostCenterName(e.target.value)} /></label>
+            <label>Import existing .xlsx<input type="file" accept=".xlsx" onChange={importExcel} disabled={importing} /></label>
+          </div>
+        </section>
+
+        <section className="panel">
+          <div className="actions" style={{ justifyContent: 'space-between' }}>
+            <h2>Activities</h2>
+            <button type="button" className="secondary" onClick={addActivity}>Add activity</button>
+          </div>
+          <div className="grid">
+            {activities.map((activity, index) => {
+              const monthly = allocateMonthly(activity);
+              return (
+                <div className="panel activity-card" key={index}>
+                  <div className="activity-header">
+                    <h3>{activity.activityNumber || `Activity ${index + 1}`}</h3>
+                    <span className="muted">Allocated: {formatVatu(Object.values(monthly).reduce((a, b) => a + b, 0))}</span>
+                  </div>
+                  <div className="grid cols-3">
+                    <label>Activity #<input value={activity.activityNumber} onChange={(e) => updateActivity(index, { activityNumber: e.target.value })} /></label>
+                    <label>Sub-program<input value={activity.subProgram} onChange={(e) => updateActivity(index, { subProgram: e.target.value })} /></label>
+                    <label>Job code<input value={activity.jobCode} onChange={(e) => updateActivity(index, { jobCode: e.target.value })} /></label>
+                    <label>Activity description<textarea value={activity.activityDescription} onChange={(e) => updateActivity(index, { activityDescription: e.target.value })} /></label>
+                    <label>Description of expenditure<textarea value={activity.expenditureDescription} onChange={(e) => updateActivity(index, { expenditureDescription: e.target.value })} /></label>
+                    <label>Responsibility<input value={activity.responsibility} onChange={(e) => updateActivity(index, { responsibility: e.target.value })} /></label>
+                    <label>Corporate Plan key activity<textarea value={activity.corporatePlanKeyActivity} onChange={(e) => updateActivity(index, { corporatePlanKeyActivity: e.target.value })} /></label>
+                    <label>Output/service target<textarea value={activity.outputOrServiceTarget} onChange={(e) => updateActivity(index, { outputOrServiceTarget: e.target.value })} /></label>
+                    <label>Target for year<textarea value={activity.targetForYear} onChange={(e) => updateActivity(index, { targetForYear: e.target.value })} /></label>
+                    <label>Estimated cost<input type="number" value={activity.estimatedCost} onChange={(e) => updateActivity(index, { estimatedCost: Number(e.target.value), recurrentBudget: Number(e.target.value) })} /></label>
+                    <label>Recurrent budget<input type="number" value={activity.recurrentBudget} onChange={(e) => updateActivity(index, { recurrentBudget: Number(e.target.value) })} /></label>
+                    <label>Development partners<input type="number" value={activity.developmentPartners} onChange={(e) => updateActivity(index, { developmentPartners: Number(e.target.value) })} /></label>
+                    <label>Account code<input value={activity.accountCode} onChange={(e) => updateActivity(index, { accountCode: e.target.value })} /></label>
+                    <label>Budget category<input value={activity.budgetCategory} onChange={(e) => updateActivity(index, { budgetCategory: e.target.value })} /></label>
+                    <label>Funding<input value={activity.funding} onChange={(e) => updateActivity(index, { funding: e.target.value })} /></label>
+                  </div>
+                  <div className="actions" style={{ marginTop: 14, justifyContent: 'space-between' }}>
+                    <div className="quarters">
+                      {(['q1', 'q2', 'q3', 'q4'] as const).map((q) => (
+                        <label key={q}><input type="checkbox" checked={activity[q]} onChange={(e) => updateActivity(index, { [q]: e.target.checked } as Partial<ActivityInput>)} />{q.toUpperCase()}</label>
+                      ))}
+                    </div>
+                    {activities.length > 1 && <button type="button" className="danger" onClick={() => removeActivity(index)}>Remove</button>}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+
+        <section className="panel">
+          <h2>Monthly cashflow preview</h2>
+          <div className="table-wrap">
+            <table>
+              <thead><tr>{MONTHS.map((m) => <th key={m} className="money">{m}</th>)}</tr></thead>
+              <tbody><tr>{MONTHS.map((m) => <td key={m} className="money">{formatVatu(summary.monthlyTotals[m])}</td>)}</tr></tbody>
+            </table>
+          </div>
+        </section>
+
+        <div className="actions sticky-actions">
+          <button type="submit">{selectedPlanId ? 'Update business plan' : 'Save business plan'}</button>
+          <span className="muted">{message}</span>
+        </div>
+      </form>
+
+      <section className="panel" style={{ marginTop: 18 }}>
+        <h2>Saved plans</h2>
+        {loading ? <p>Loading...</p> : plans.length === 0 ? <p className="muted">No saved plans yet.</p> : (
+          <div className="table-wrap">
+            <table>
+              <thead><tr><th>Plan</th><th>Year</th><th>Facility</th><th>Status</th><th className="money">Estimated</th><th className="money">Cashflow</th><th>Actions</th></tr></thead>
+              <tbody>
+                {plans.map((plan) => (
+                  <tr key={plan.id}>
+                    <td>{plan.title}</td>
+                    <td>{plan.year}</td>
+                    <td>{plan.facility}</td>
+                    <td><span className={`badge status-${plan.status.toLowerCase()}`}>{plan.status}</span></td>
+                    <td className="money">{formatVatu(plan.summary?.totalEstimatedCost ?? 0)}</td>
+                    <td className="money">{formatVatu(plan.summary?.cashflowTotal ?? 0)}</td>
+                    <td className="actions"><button type="button" className="secondary" onClick={() => loadPlan(plan.id)}>Edit</button><a href={`/api/plans/${plan.id}/export`}>Export</a></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
+      {selectedPlanId && (
+        <section className="panel" style={{ marginTop: 18 }}>
+          <h2>Audit history</h2>
+          {auditLogs.length === 0 ? <p className="muted">No audit records yet.</p> : (
+            <div className="timeline">
+              {auditLogs.map((log) => (
+                <div className="timeline-item" key={log.id}>
+                  <strong>{log.action}</strong>
+                  <span>{new Date(log.createdAt).toLocaleString()}</span>
+                  <p>{log.details}</p>
+                  <small>{log.user?.name || 'System'}</small>
+                </div>
+              ))}
+            </div>
+          )}
+          <p className="footer-note">Auth foundation is intentionally simple for the MVP: actions are attributed to the configured default admin user. Full login/roles can be added next.</p>
+        </section>
+      )}
+
+      <p className="footer-note">Local/private mode: Docker Compose app + bundled PostgreSQL. Render mode: Docker app + managed PostgreSQL from render.yaml.</p>
+    </main>
+  );
+}

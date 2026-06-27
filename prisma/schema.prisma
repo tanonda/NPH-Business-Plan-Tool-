@@ -1,0 +1,91 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum PlanStatus {
+  DRAFT
+  REVIEW
+  APPROVED
+  SUBMITTED
+}
+
+enum UserRole {
+  ADMIN
+  PLANNER
+  REVIEWER
+  VIEWER
+}
+
+model User {
+  id          String     @id @default(cuid())
+  name        String
+  email       String     @unique
+  role        UserRole   @default(PLANNER)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  auditLogs   AuditLog[]
+}
+
+model BusinessPlan {
+  id             String       @id @default(cuid())
+  title          String
+  organization   String       @default("Ministry of Health")
+  facility       String       @default("Vila Central Hospital")
+  costCenter     String       @default("61RB")
+  costCenterName String       @default("Vila Central Hospital")
+  year           Int          @default(2026)
+  ceilingAmount  Decimal      @default(0) @db.Decimal(18, 2)
+  status         PlanStatus   @default(DRAFT)
+  submittedAt    DateTime?
+  approvedAt     DateTime?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  activities     Activity[]
+  auditLogs      AuditLog[]
+}
+
+model Activity {
+  id                       String       @id @default(cuid())
+  businessPlanId           String
+  businessPlan             BusinessPlan @relation(fields: [businessPlanId], references: [id], onDelete: Cascade)
+  subProgram               String       @default("")
+  corporatePlanKeyActivity String       @default("")
+  outputOrServiceTarget    String       @default("")
+  targetForYear            String       @default("")
+  responsibility           String       @default("")
+  activityNumber           String       @default("")
+  activityDescription      String
+  jobCode                  String       @default("")
+  expenditureDescription   String
+  estimatedCost            Decimal      @default(0) @db.Decimal(18, 2)
+  recurrentBudget          Decimal      @default(0) @db.Decimal(18, 2)
+  developmentPartners      Decimal      @default(0) @db.Decimal(18, 2)
+  q1                       Boolean      @default(true)
+  q2                       Boolean      @default(true)
+  q3                       Boolean      @default(true)
+  q4                       Boolean      @default(true)
+  funding                  String       @default("Recurrent")
+  budgetCategory           String       @default("Operations")
+  accountCode              String       @default("")
+  sortOrder                Int          @default(0)
+  createdAt                DateTime     @default(now())
+  updatedAt                DateTime     @updatedAt
+}
+
+model AuditLog {
+  id             String        @id @default(cuid())
+  businessPlanId String?
+  businessPlan   BusinessPlan? @relation(fields: [businessPlanId], references: [id], onDelete: Cascade)
+  userId         String?
+  user           User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action         String
+  details        String        @default("")
+  createdAt      DateTime      @default(now())
+
+  @@index([businessPlanId, createdAt])
+}

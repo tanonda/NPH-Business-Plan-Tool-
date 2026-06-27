@@ -1,0 +1,37 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: business-plan-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: businessplan
+      POSTGRES_PASSWORD: businessplan_password
+      POSTGRES_DB: businessplan
+    volumes:
+      - business_plan_pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U businessplan -d businessplan"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  web:
+    build: .
+    container_name: business-plan-web
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://businessplan:businessplan_password@db:5432/businessplan
+      NEXT_PUBLIC_APP_NAME: VNH Business Plan Tool
+      DEFAULT_ADMIN_EMAIL: admin@vnh.local
+      DEFAULT_ADMIN_NAME: Business Plan Admin
+      NODE_ENV: production
+    ports:
+      - "3000:3000"
+
+volumes:
+  business_plan_pgdata:
