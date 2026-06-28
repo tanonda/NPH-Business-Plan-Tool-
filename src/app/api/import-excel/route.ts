@@ -1,6 +1,7 @@
 import ExcelJS from 'exceljs';
 import { ActivitySchema } from '@/lib/schemas';
 import { z } from 'zod';
+import { requireApiUser, requireApiRole } from '@/lib/api-auth-guard';
 
 function text(value: unknown): string {
   if (value === null || value === undefined) return '';
@@ -21,13 +22,16 @@ function isMarked(value: unknown): boolean {
 }
 
 export async function POST(request: Request) {
+  const auth = await requireApiRole(['ADMIN', 'PLANNER']);
+  if (!auth.ok) return auth.response;
+
   const formData = await request.formData();
   const file = formData.get('file');
   if (!(file instanceof File)) return Response.json({ error: 'Upload an .xlsx file using field name file.' }, { status: 400 });
 
   const workbook = new ExcelJS.Workbook();
   const buffer = Buffer.from(await file.arrayBuffer());
-  await workbook.xlsx.load(buffer);
+  await workbook.xlsx.load(buffer as unknown as ArrayBuffer);
 
   const bp = workbook.getWorksheet('61RB-BP');
   if (!bp) return Response.json({ error: 'Workbook is missing the 61RB-BP sheet.' }, { status: 400 });

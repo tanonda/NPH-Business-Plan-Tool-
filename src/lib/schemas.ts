@@ -29,6 +29,7 @@ export const PlanSchema = z.object({
   facility: z.string().default('Vila Central Hospital'),
   costCenter: z.string().default('61RB'),
   costCenterName: z.string().default('Vila Central Hospital'),
+  departmentId: z.string().trim().optional().nullable(),
   year: z.coerce.number().int().default(2026),
   ceilingAmount: z.coerce.number().nonnegative().default(0),
   activities: z.array(ActivitySchema).default([])

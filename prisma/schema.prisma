@@ -1,3 +1,17 @@
+// VNH Business Plan Tool
+// Prisma schema with login, role-based access control, department permissions,
+// approval comments, version snapshots, and audit history support.
+//
+// Drop-in path:
+//   prisma/schema.prisma
+//
+// After replacing the existing schema, run:
+//   npx prisma generate
+//   npx prisma migrate dev --name add_auth_rbac_departments
+//
+// For production/Render:
+//   npx prisma migrate deploy
+
 generator client {
   provider = "prisma-client-js"
 }
@@ -7,6 +21,14 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum Role {
+  ADMIN
+  PLANNER
+  APPROVER
+  REVIEWER
+  VIEWER
+}
+
 enum PlanStatus {
   DRAFT
   REVIEW
@@ -14,78 +36,318 @@ enum PlanStatus {
   SUBMITTED
 }
 
-enum UserRole {
-  ADMIN
-  PLANNER
+enum DepartmentAccessLevel {
+  OWNER
+  EDITOR
   REVIEWER
   VIEWER
 }
 
+enum AuditAction {
+  PLAN_CREATED
+  PLAN_UPDATED
+  PLAN_DELETED
+  STATUS_DRAFT
+  STATUS_REVIEW
+  STATUS_APPROVED
+  STATUS_SUBMITTED
+  APPROVAL_COMMENT
+  VERSION_SNAPSHOT_SUBMITTED
+  VERSION_SNAPSHOT_APPROVED
+  EXCEL_IMPORTED
+  EXCEL_EXPORTED
+  SNAPSHOT_EXPORTED
+  PASSWORD_CHANGED
+  NOTIFICATION_READ
+  EXECUTIVE_REPORT_VIEWED
+  USER_LOGIN
+  USER_LOGOUT
+  USER_CREATED
+  USER_UPDATED
+  USER_DISABLED
+  DEPARTMENT_ACCESS_GRANTED
+  DEPARTMENT_ACCESS_REVOKED
+}
+
 model User {
-  id          String     @id @default(cuid())
-  name        String
-  email       String     @unique
-  role        UserRole   @default(PLANNER)
-  createdAt   DateTime   @default(now())
-  updatedAt   DateTime   @updatedAt
-  auditLogs   AuditLog[]
+  id           String   @id @default(cuid())
+  name         String
+  email        String   @unique
+  passwordHash String
+  role         Role     @default(PLANNER)
+  isActive     Boolean  @default(true)
+
+  // If true, user can access every department/cost centre.
+  // Usually true only for ADMIN or senior national users.
+  canAccessAllDepartments Boolean @default(false)
+
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  lastLoginAt  DateTime?
+
+  ownedPlans           BusinessPlan[]             @relation("BusinessPlanOwner")
+  createdPlans         BusinessPlan[]             @relation("BusinessPlanCreatedBy")
+  updatedPlans         BusinessPlan[]             @relation("BusinessPlanUpdatedBy")
+  auditLogs            AuditLog[]
+  sessions             Session[]
+  departmentAccess     UserDepartmentAccess[]
+  approvalComments     ApprovalComment[]
+  versionSnapshots     VersionSnapshot[]
+  notifications        Notification[]
+  exportHistory        ExportHistory[]
+
+  @@index([role])
+  @@index([isActive])
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  tokenHash String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model Department {
+  id             String   @id @default(cuid())
+  code           String   @unique
+  name           String
+  organization   String   @default("Ministry of Health")
+  facility       String?
+  costCenter     String?
+  costCenterName String?
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  plans          BusinessPlan[]
+  userAccess     UserDepartmentAccess[]
+
+  @@index([code])
+  @@index([isActive])
+}
+
+model UserDepartmentAccess {
+  id          String                @id @default(cuid())
+  userId      String
+  departmentId String
+  accessLevel DepartmentAccessLevel @default(VIEWER)
+  createdAt   DateTime              @default(now())
+
+  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  department  Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, departmentId])
+  @@index([departmentId])
+  @@index([accessLevel])
 }
 
 model BusinessPlan {
-  id             String       @id @default(cuid())
+  id             String     @id @default(cuid())
   title          String
-  organization   String       @default("Ministry of Health")
-  facility       String       @default("Vila Central Hospital")
-  costCenter     String       @default("61RB")
-  costCenterName String       @default("Vila Central Hospital")
-  year           Int          @default(2026)
-  ceilingAmount  Decimal      @default(0) @db.Decimal(18, 2)
-  status         PlanStatus   @default(DRAFT)
+  organization   String     @default("Ministry of Health")
+  year           Int
+  facility       String
+  costCenter     String
+  costCenterName String
+  ceilingAmount  Decimal    @default(0) @db.Decimal(18, 2)
+  status         PlanStatus @default(DRAFT)
+
+  departmentId   String?
+  department     Department? @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+
+  ownerId        String?
+  owner          User? @relation("BusinessPlanOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+
+  createdById    String?
+  createdBy      User? @relation("BusinessPlanCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  updatedById    String?
+  updatedBy      User? @relation("BusinessPlanUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+
   submittedAt    DateTime?
   approvedAt     DateTime?
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
-  activities     Activity[]
-  auditLogs      AuditLog[]
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  activities       Activity[]
+  auditLogs        AuditLog[]
+  approvalComments ApprovalComment[]
+  versionSnapshots VersionSnapshot[]
+  notifications    Notification[]
+  exportHistory     ExportHistory[]
+
+  @@index([year])
+  @@index([status])
+  @@index([departmentId])
+  @@index([costCenter])
+  @@index([ownerId])
 }
 
 model Activity {
   id                       String       @id @default(cuid())
   businessPlanId           String
   businessPlan             BusinessPlan @relation(fields: [businessPlanId], references: [id], onDelete: Cascade)
-  subProgram               String       @default("")
+
+  subProgram               String
   corporatePlanKeyActivity String       @default("")
   outputOrServiceTarget    String       @default("")
   targetForYear            String       @default("")
   responsibility           String       @default("")
-  activityNumber           String       @default("")
+
+  activityNumber           String
   activityDescription      String
   jobCode                  String       @default("")
-  expenditureDescription   String
+  expenditureDescription   String       @default("")
+
   estimatedCost            Decimal      @default(0) @db.Decimal(18, 2)
   recurrentBudget          Decimal      @default(0) @db.Decimal(18, 2)
   developmentPartners      Decimal      @default(0) @db.Decimal(18, 2)
-  q1                       Boolean      @default(true)
-  q2                       Boolean      @default(true)
-  q3                       Boolean      @default(true)
-  q4                       Boolean      @default(true)
+
+  q1                       Boolean      @default(false)
+  q2                       Boolean      @default(false)
+  q3                       Boolean      @default(false)
+  q4                       Boolean      @default(false)
+
   funding                  String       @default("Recurrent")
   budgetCategory           String       @default("Operations")
   accountCode              String       @default("")
   sortOrder                Int          @default(0)
+
   createdAt                DateTime     @default(now())
   updatedAt                DateTime     @updatedAt
+
+  @@index([businessPlanId])
+  @@index([activityNumber])
+  @@index([subProgram])
+  @@index([sortOrder])
 }
 
 model AuditLog {
-  id             String        @id @default(cuid())
+  id             String       @id @default(cuid())
   businessPlanId String?
   businessPlan   BusinessPlan? @relation(fields: [businessPlanId], references: [id], onDelete: Cascade)
-  userId         String?
-  user           User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
-  action         String
-  details        String        @default("")
-  createdAt      DateTime      @default(now())
 
-  @@index([businessPlanId, createdAt])
+  userId         String?
+  user           User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  action         String
+  details        String       @default("")
+
+  // Optional structured data. Useful for snapshots, imported file metadata,
+  // previous/new values, and approval comment payloads.
+  metadata       Json?
+
+  createdAt      DateTime     @default(now())
+
+  @@index([businessPlanId])
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+}
+
+model ApprovalComment {
+  id             String       @id @default(cuid())
+  businessPlanId String
+  businessPlan   BusinessPlan @relation(fields: [businessPlanId], references: [id], onDelete: Cascade)
+
+  userId         String?
+  user           User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  comment        String
+  statusAtTime   PlanStatus?
+  createdAt      DateTime     @default(now())
+
+  @@index([businessPlanId])
+  @@index([userId])
+  @@index([createdAt])
+}
+
+model VersionSnapshot {
+  id             String       @id @default(cuid())
+  businessPlanId String
+  businessPlan   BusinessPlan @relation(fields: [businessPlanId], references: [id], onDelete: Cascade)
+
+  capturedById   String?
+  capturedBy     User?        @relation(fields: [capturedById], references: [id], onDelete: SetNull)
+
+  status         PlanStatus
+  label          String
+  snapshot       Json
+  createdAt      DateTime     @default(now())
+
+  @@index([businessPlanId])
+  @@index([capturedById])
+  @@index([status])
+  @@index([createdAt])
+}
+
+
+model ApprovalSnapshot {
+  id                 String   @id @default(cuid())
+  businessPlanId     String
+  snapshotType       String
+  status             String
+  title              String
+  facility           String?
+  departmentId       String?
+  departmentName     String?
+  totalEstimatedCost Float    @default(0)
+  recurrentCost      Float    @default(0)
+  unfundedCost       Float    @default(0)
+  activityCount      Int      @default(0)
+  snapshotData       Json
+  createdById        String?
+  createdByName      String?
+  createdByEmail     String?
+  createdAt          DateTime @default(now())
+
+  @@index([businessPlanId])
+  @@index([snapshotType])
+  @@index([status])
+  @@index([createdAt])
+}
+
+
+model Notification {
+  id             String   @id @default(cuid())
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  businessPlanId String?
+  businessPlan   BusinessPlan? @relation(fields: [businessPlanId], references: [id], onDelete: Cascade)
+  type           String
+  title          String
+  message        String
+  readAt         DateTime?
+  metadata       Json?
+  createdAt      DateTime @default(now())
+
+  @@index([userId])
+  @@index([businessPlanId])
+  @@index([readAt])
+  @@index([createdAt])
+}
+
+model ExportHistory {
+  id             String   @id @default(cuid())
+  userId         String?
+  user           User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  businessPlanId String?
+  businessPlan   BusinessPlan? @relation(fields: [businessPlanId], references: [id], onDelete: Cascade)
+  snapshotId     String?
+  exportType     String
+  format         String
+  fileName       String
+  metadata       Json?
+  createdAt      DateTime @default(now())
+
+  @@index([userId])
+  @@index([businessPlanId])
+  @@index([snapshotId])
+  @@index([exportType])
+  @@index([createdAt])
 }

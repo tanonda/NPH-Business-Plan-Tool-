@@ -1,7 +1,19 @@
 'use client';
 
+import { UserSessionBar } from '@/components/UserSessionBar';
+import { UserManagementPanel } from '@/components/UserManagementPanel';
+import { RoleAccessTestPanel } from '@/components/RoleAccessTestPanel';
+import { useCurrentUser } from '@/components/useCurrentUser';
 import { FormEvent, ChangeEvent, useEffect, useMemo, useState } from 'react';
 import { allocateMonthly, formatVatu, MONTHS, summarizePlan } from '@/lib/business-plan-engine';
+import { ExecutiveReportButton } from '@/components/ExecutiveReportButton';
+import { AuthGate } from '@/components/AuthGate';
+import { ApprovalCommentsPanel } from '@/components/ApprovalCommentsPanel';
+import { ApprovalSnapshotsPanel } from '@/components/ApprovalSnapshotsPanel';
+import { DashboardSummaryPanel } from '@/components/DashboardSummaryPanel';
+import { NotificationsPanel } from '@/components/NotificationsPanel';
+import { PasswordChangePanel } from '@/components/PasswordChangePanel';
+import { PlanComparisonPanel } from '@/components/PlanComparisonPanel';
 
 type Status = 'DRAFT' | 'REVIEW' | 'APPROVED' | 'SUBMITTED';
 
@@ -28,6 +40,8 @@ type ActivityInput = {
   sortOrder: number;
 };
 
+type Department = { id: string; code: string; name: string; costCenter?: string | null; costCenterName?: string | null };
+
 type Plan = {
   id: string;
   title: string;
@@ -36,6 +50,7 @@ type Plan = {
   facility: string;
   costCenter: string;
   costCenterName: string;
+  departmentId?: string | null;
   ceilingAmount: string | number;
   status: Status;
   updatedAt?: string;
@@ -102,6 +117,8 @@ function normalizeActivity(activity: any, index: number): ActivityInput {
 export default function HomePage() {
   const [plans, setPlans] = useState<Plan[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [comparisonRefreshKey, setComparisonRefreshKey] = useState(0);
   const [loading, setLoading] = useState(true);
   const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
   const [status, setStatus] = useState<Status>('DRAFT');
@@ -111,16 +128,67 @@ export default function HomePage() {
   const [facility, setFacility] = useState('Vila Central Hospital');
   const [costCenter, setCostCenter] = useState('61RB');
   const [costCenterName, setCostCenterName] = useState('Vila Central Hospital');
+  const [departmentId, setDepartmentId] = useState('');
   const [ceilingAmount, setCeilingAmount] = useState(283739303);
   const [activities, setActivities] = useState<ActivityInput[]>([emptyActivity(1)]);
   const [message, setMessage] = useState('');
   const [importing, setImporting] = useState(false);
+  const [suggestingIndex, setSuggestingIndex] = useState<number | null>(null);
+
+  const { user } = useCurrentUser();
+  const role = user?.role || 'VIEWER';
+
+  const canEditPlan =
+    role === 'ADMIN' || (role === 'PLANNER' && status === 'DRAFT');
+  const canDeletePlan = role === 'ADMIN';
+  const canImport = role === 'ADMIN' || role === 'PLANNER';
+
+  const planLockedForUser = Boolean(selectedPlanId) && !canEditPlan;
+
+  const planLockMessage =
+    role === 'ADMIN'
+      ? ''
+      : status === 'REVIEW'
+        ? 'This plan is under review and locked from normal editing.'
+        : status === 'APPROVED'
+          ? 'This plan is approved and locked from normal editing.'
+          : status === 'SUBMITTED'
+            ? 'This plan is submitted and fully locked.'
+            : role !== 'PLANNER'
+              ? 'Your role can view this plan but cannot edit plan content.'
+              : '';
+  const canSuggestDescriptions =
+    role === 'ADMIN' || role === 'PLANNER' || role === 'APPROVER' || role === 'REVIEWER';
+
+  const allowedStatusTransitions = (() => {
+    if (role === 'ADMIN') {
+      return (['DRAFT', 'REVIEW', 'APPROVED', 'SUBMITTED'] as Status[]).filter((item) => item !== status);
+    }
+
+    if (role === 'PLANNER' && status === 'DRAFT') {
+      return ['REVIEW'] as Status[];
+    }
+
+    if (role === 'APPROVER' && status === 'REVIEW') {
+      return ['APPROVED'] as Status[];
+    }
+
+    if (role === 'APPROVER' && status === 'APPROVED') {
+      return ['SUBMITTED'] as Status[];
+    }
+
+    return [] as Status[];
+  })();
+
+  const canChangeStatus = allowedStatusTransitions.length > 0;
 
   async function refresh() {
     setLoading(true);
     const res = await fetch('/api/plans', { cache: 'no-store' });
     const data = await res.json();
     setPlans(data);
+    const deptRes = await fetch('/api/departments', { cache: 'no-store' });
+    if (deptRes.ok) setDepartments(await deptRes.json());
     setLoading(false);
   }
 
@@ -150,6 +218,7 @@ export default function HomePage() {
     setFacility('Vila Central Hospital');
     setCostCenter('61RB');
     setCostCenterName('Vila Central Hospital');
+    setDepartmentId('');
     setCeilingAmount(283739303);
     setActivities([emptyActivity(1)]);
     setAuditLogs([]);
@@ -171,6 +240,7 @@ export default function HomePage() {
     setFacility(plan.facility);
     setCostCenter(plan.costCenter);
     setCostCenterName(plan.costCenterName);
+    setDepartmentId(plan.departmentId || '');
     setCeilingAmount(Number(plan.ceilingAmount || 0));
     setActivities((plan.activities || []).map(normalizeActivity));
     setMessage(`Loaded ${plan.title}.`);
@@ -184,26 +254,38 @@ export default function HomePage() {
 
   async function savePlan(event: FormEvent) {
     event.preventDefault();
+    if (!canEditPlan) {
+      setMessage('Your role does not allow saving or editing business plans.');
+      return;
+    }
+
     const cleanActivities = activities.map((activity, index) => ({ ...activity, sortOrder: index + 1 }));
     setMessage(selectedPlanId ? 'Updating business plan...' : 'Saving business plan...');
     const res = await fetch(selectedPlanId ? `/api/plans/${selectedPlanId}` : '/api/plans', {
       method: selectedPlanId ? 'PUT' : 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title, organization, year, facility, costCenter, costCenterName, ceilingAmount, activities: cleanActivities })
+      body: JSON.stringify({ title, organization, year, facility, costCenter, costCenterName, departmentId: departmentId || null, ceilingAmount, activities: cleanActivities })
     });
     if (!res.ok) {
-      setMessage('Could not save plan. Check required activity and expenditure descriptions.');
+      const err = await res.json().catch(() => ({}));
+      setMessage(err.error || 'Could not save plan. Check required activity and expenditure descriptions.');
       return;
     }
     const saved = await res.json();
     setSelectedPlanId(saved.id);
     setStatus(saved.status);
-    setMessage('Saved. Dashboard, audit history, and Excel export are ready.');
+    setMessage('Saved. Dashboard, audit history, and Excel/PDF export are ready.');
+    setComparisonRefreshKey((value) => value + 1);
     await refresh();
     await loadAudit(saved.id);
   }
 
   async function changeStatus(nextStatus: Status) {
+    if (!canChangeStatus) {
+      setMessage('Your role does not allow changing approval status.');
+      return;
+    }
+
     if (!selectedPlanId) {
       setMessage('Save the plan first before changing approval status.');
       return;
@@ -211,14 +293,17 @@ export default function HomePage() {
     const res = await fetch(`/api/plans/${selectedPlanId}/status`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: nextStatus })
+      body: JSON.stringify({ status: nextStatus, reason: nextStatus === 'DRAFT' || (status === 'APPROVED' && nextStatus === 'REVIEW') ? prompt('Reason for returning this plan?') || '' : '' })
     });
     if (!res.ok) {
-      setMessage('Could not update status.');
+      const err = await res.json().catch(() => ({}));
+      const issueText = Array.isArray(err.issues) ? ` ${err.issues.slice(0, 3).map((issue: any) => issue.message).join(' ')}` : '';
+      setMessage((err.error || 'Could not update status.') + issueText);
       return;
     }
     setStatus(nextStatus);
     setMessage(`Status changed to ${nextStatus}.`);
+    setComparisonRefreshKey((value) => value + 1);
     await refresh();
     await loadAudit(selectedPlanId);
   }
@@ -226,6 +311,13 @@ export default function HomePage() {
   async function importExcel(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) return;
+
+    if (!canImport) {
+      setMessage('Your role does not allow importing Excel workbooks.');
+      event.target.value = '';
+      return;
+    }
+
     setImporting(true);
     setMessage('Importing Excel workbook...');
     const formData = new FormData();
@@ -245,6 +337,7 @@ export default function HomePage() {
     setFacility(imported.facility || facility);
     setCostCenter(imported.costCenter || costCenter);
     setCostCenterName(imported.costCenterName || costCenterName);
+    setDepartmentId(imported.departmentId || '');
     setCeilingAmount(Number(imported.ceilingAmount || ceilingAmount));
     setActivities((imported.activities || []).map(normalizeActivity));
     setAuditLogs([]);
@@ -253,6 +346,11 @@ export default function HomePage() {
   }
 
   async function deleteSelectedPlan() {
+    if (!canDeletePlan) {
+      setMessage('Only an ADMIN can delete saved business plans.');
+      return;
+    }
+
     if (!selectedPlanId) return;
     if (!confirm('Delete this saved business plan?')) return;
     const res = await fetch(`/api/plans/${selectedPlanId}`, { method: 'DELETE' });
@@ -263,14 +361,65 @@ export default function HomePage() {
     }
   }
 
+
+  async function suggestExpenditureDescription(index: number) {
+    const activity = activities[index];
+    if (!activity) return;
+
+    if (!activity.activityDescription.trim()) {
+      setMessage('Add an activity description first, then I can suggest the expenditure description.');
+      return;
+    }
+
+    setSuggestingIndex(index);
+    setMessage(`Generating expenditure description for ${activity.activityNumber || `activity ${index + 1}`}...`);
+
+    try {
+      const res = await fetch('/api/expenditure-description-helper', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ activity })
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || 'The description helper could not generate a suggestion.');
+      }
+
+      const data = await res.json();
+      const suggestion = Array.isArray(data.suggestions) ? data.suggestions[0] : data;
+      const suggestedDescription = suggestion?.suggestedDescription || suggestion?.description || '';
+
+      if (!suggestedDescription) {
+        throw new Error('The helper returned no description.');
+      }
+
+      updateActivity(index, { expenditureDescription: suggestedDescription });
+      const source = suggestion?.source === 'openai' ? 'AI' : 'local rules';
+      setMessage(`Suggested expenditure description added for ${activity.activityNumber || `activity ${index + 1}`} using ${source}.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Could not generate expenditure description.');
+    } finally {
+      setSuggestingIndex(null);
+    }
+  }
+
   return (
-    <main className="container">
-      <section className="hero">
+    <AuthGate>
+      <main className="container">
+        <UserSessionBar />
+        <UserManagementPanel />
+        <RoleAccessTestPanel />
+        <NotificationsPanel />
+        <PasswordChangePanel />
+        <DashboardSummaryPanel />
+
+        <section className="hero">
         <div>
           <h1>Business Plan Tool</h1>
           <p>
             Build VNH-style annual business plans, edit saved plans, import existing Excel workbooks,
-            track approval status, audit changes, and export the corrected 61RB workbook.
+            track approval status, audit changes, and export the corrected 61RB workbook or PDF.
           </p>
         </div>
         <div className="hero-badges">
@@ -293,11 +442,26 @@ export default function HomePage() {
         </div>
         <div className="actions">
           <button type="button" className="secondary" onClick={clearForm}>New plan</button>
-          {(['DRAFT', 'REVIEW', 'APPROVED', 'SUBMITTED'] as Status[]).map((s) => (
-            <button type="button" key={s} className={status === s ? '' : 'secondary'} onClick={() => changeStatus(s)}>{s}</button>
+          {canChangeStatus && allowedStatusTransitions.map((s) => (
+            <button type="button" key={s} className="secondary" onClick={() => changeStatus(s)}>
+              {status === 'DRAFT' && s === 'REVIEW' ? 'Submit for Review' : ''}
+              {status === 'REVIEW' && s === 'APPROVED' ? 'Approve' : ''}
+              {status === 'APPROVED' && s === 'SUBMITTED' ? 'Submit Final' : ''}
+              {status === 'REVIEW' && s === 'DRAFT' ? 'Return to Planner' : ''}
+              {status === 'APPROVED' && s === 'REVIEW' ? 'Return to Review' : ''}
+              {status === 'APPROVED' && s === 'DRAFT' ? 'Reject / Return to Draft' : ''}
+              {role === 'ADMIN' ? `Move to ${s}` : ''}
+            </button>
           ))}
-          {selectedPlanId && <a className="button-link" href={`/api/plans/${selectedPlanId}/export`}>Download Excel</a>}
-          {selectedPlanId && <button type="button" className="danger" onClick={deleteSelectedPlan}>Delete</button>}
+          {selectedPlanId && <a className="button-link" href={`/api/plans/${selectedPlanId}/export?format=xlsx`}>Download Excel</a>}
+          {selectedPlanId && <a className="button-link" href={`/api/plans/${selectedPlanId}/export?format=pdf`}>Download PDF</a>}
+          {selectedPlan?.id && (
+            <ExecutiveReportButton
+              planId={selectedPlan.id}
+              planTitle={selectedPlan.title}
+            />
+          )}
+          {canDeletePlan && selectedPlanId && <button type="button" className="danger" onClick={deleteSelectedPlan}>Delete</button>}
         </div>
       </section>
 
@@ -312,14 +476,22 @@ export default function HomePage() {
             <label>Ceiling amount<input type="number" value={ceilingAmount} onChange={(e) => setCeilingAmount(Number(e.target.value))} /></label>
             <label>Facility<input value={facility} onChange={(e) => setFacility(e.target.value)} /></label>
             <label>Cost center name<input value={costCenterName} onChange={(e) => setCostCenterName(e.target.value)} /></label>
-            <label>Import existing .xlsx<input type="file" accept=".xlsx" onChange={importExcel} disabled={importing} /></label>
+            <label>Department
+              <select value={departmentId} onChange={(e) => setDepartmentId(e.target.value)}>
+                <option value="">Select department</option>
+                {departments.map((department) => (
+                  <option key={department.id} value={department.id}>{department.code} — {department.name}</option>
+                ))}
+              </select>
+            </label>
+            {canImport && <label>Import existing .xlsx<input type="file" accept=".xlsx" onChange={importExcel} disabled={importing} /></label>}
           </div>
         </section>
 
         <section className="panel">
           <div className="actions" style={{ justifyContent: 'space-between' }}>
             <h2>Activities</h2>
-            <button type="button" className="secondary" onClick={addActivity}>Add activity</button>
+            {canEditPlan && <button type="button" className="secondary" onClick={addActivity}>Add activity</button>}
           </div>
           <div className="grid">
             {activities.map((activity, index) => {
@@ -335,7 +507,29 @@ export default function HomePage() {
                     <label>Sub-program<input value={activity.subProgram} onChange={(e) => updateActivity(index, { subProgram: e.target.value })} /></label>
                     <label>Job code<input value={activity.jobCode} onChange={(e) => updateActivity(index, { jobCode: e.target.value })} /></label>
                     <label>Activity description<textarea value={activity.activityDescription} onChange={(e) => updateActivity(index, { activityDescription: e.target.value })} /></label>
-                    <label>Description of expenditure<textarea value={activity.expenditureDescription} onChange={(e) => updateActivity(index, { expenditureDescription: e.target.value })} /></label>
+                    <label>
+                      <span style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
+                        Description of expenditure
+                        <button
+                          type="button"
+                          className="secondary"
+                          onClick={(event) => {
+                            event.preventDefault();
+                            void suggestExpenditureDescription(index);
+                          }}
+                          disabled={suggestingIndex === index || !activity.activityDescription.trim() || !canSuggestDescriptions}
+                          title={!activity.activityDescription.trim() ? 'Add an activity description first' : 'Generate a practical expenditure description'}
+                          style={{ padding: '6px 10px', fontSize: 12, whiteSpace: 'nowrap' }}
+                        >
+                          {suggestingIndex === index ? 'Suggesting...' : 'Suggest Description'}
+                        </button>
+                      </span>
+                      <textarea
+                        value={activity.expenditureDescription}
+                        onChange={(e) => updateActivity(index, { expenditureDescription: e.target.value })}
+                        placeholder="Use Suggest Description, or type the planned expenditure items manually."
+                      />
+                    </label>
                     <label>Responsibility<input value={activity.responsibility} onChange={(e) => updateActivity(index, { responsibility: e.target.value })} /></label>
                     <label>Corporate Plan key activity<textarea value={activity.corporatePlanKeyActivity} onChange={(e) => updateActivity(index, { corporatePlanKeyActivity: e.target.value })} /></label>
                     <label>Output/service target<textarea value={activity.outputOrServiceTarget} onChange={(e) => updateActivity(index, { outputOrServiceTarget: e.target.value })} /></label>
@@ -353,7 +547,7 @@ export default function HomePage() {
                         <label key={q}><input type="checkbox" checked={activity[q]} onChange={(e) => updateActivity(index, { [q]: e.target.checked } as Partial<ActivityInput>)} />{q.toUpperCase()}</label>
                       ))}
                     </div>
-                    {activities.length > 1 && <button type="button" className="danger" onClick={() => removeActivity(index)}>Remove</button>}
+                    {canEditPlan && activities.length > 1 && <button type="button" className="danger" onClick={() => removeActivity(index)}>Remove</button>}
                   </div>
                 </div>
               );
@@ -372,7 +566,7 @@ export default function HomePage() {
         </section>
 
         <div className="actions sticky-actions">
-          <button type="submit">{selectedPlanId ? 'Update business plan' : 'Save business plan'}</button>
+          {canEditPlan && <button type="submit">{selectedPlanId ? 'Update business plan' : 'Save business plan'}</button>}
           <span className="muted">{message}</span>
         </div>
       </form>
@@ -392,7 +586,7 @@ export default function HomePage() {
                     <td><span className={`badge status-${plan.status.toLowerCase()}`}>{plan.status}</span></td>
                     <td className="money">{formatVatu(plan.summary?.totalEstimatedCost ?? 0)}</td>
                     <td className="money">{formatVatu(plan.summary?.cashflowTotal ?? 0)}</td>
-                    <td className="actions"><button type="button" className="secondary" onClick={() => loadPlan(plan.id)}>Edit</button><a href={`/api/plans/${plan.id}/export`}>Export</a></td>
+                    <td className="actions"><button type="button" className="secondary" onClick={() => loadPlan(plan.id)}>{canEditPlan ? 'Edit' : 'View'}</button><a href={`/api/plans/${plan.id}/export?format=xlsx`}>Excel</a><a href={`/api/plans/${plan.id}/export?format=pdf`}>PDF</a></td>
                   </tr>
                 ))}
               </tbody>
@@ -416,11 +610,21 @@ export default function HomePage() {
               ))}
             </div>
           )}
-          <p className="footer-note">Auth foundation is intentionally simple for the MVP: actions are attributed to the configured default admin user. Full login/roles can be added next.</p>
+          <p className="footer-note">Audit records are stored against the authenticated user session.</p>
         </section>
       )}
 
+
+      {selectedPlanId && (
+        <>
+          <ApprovalCommentsPanel planId={selectedPlanId} planTitle={selectedPlan?.title} onCommentAdded={() => loadAudit(selectedPlanId)} />
+          <ApprovalSnapshotsPanel planId={selectedPlanId} planTitle={selectedPlan?.title} />
+          <PlanComparisonPanel planId={selectedPlanId} refreshKey={comparisonRefreshKey} />
+        </>
+      )}
+
       <p className="footer-note">Local/private mode: Docker Compose app + bundled PostgreSQL. Render mode: Docker app + managed PostgreSQL from render.yaml.</p>
-    </main>
+      </main>
+    </AuthGate>
   );
 }

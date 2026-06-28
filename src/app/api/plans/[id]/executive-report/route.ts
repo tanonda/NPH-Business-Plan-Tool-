@@ -1,0 +1,482 @@
+import { prisma } from '@/lib/prisma';
+import { requirePlanDepartmentAccess } from '@/lib/department-access';
+import { allocateMonthly, MONTHS, summarizePlan, toNumber } from '@/lib/business-plan-engine';
+import { requireApiUser, requireApiRole } from '@/lib/api-auth-guard';
+
+export const dynamic = 'force-dynamic';
+
+type RouteContext = {
+  params: {
+    id: string;
+  };
+};
+
+type ActivityForReport = {
+  id: string;
+  subProgram: string;
+  activityNumber: string;
+  activityDescription: string;
+  expenditureDescription: string;
+  jobCode: string;
+  estimatedCost: unknown;
+  recurrentBudget: unknown;
+  developmentPartners: unknown;
+  q1: boolean;
+  q2: boolean;
+  q3: boolean;
+  q4: boolean;
+  funding: string;
+  budgetCategory: string;
+  responsibility: string;
+  sortOrder: number;
+};
+
+function money(value: unknown): number {
+  return toNumber(value === null || value === undefined ? 0 : String(value));
+}
+
+function formatVatu(value: number): string {
+  return `VT ${Math.round(value).toLocaleString('en-US')}`;
+}
+
+function percentage(value: number, total: number): string {
+  if (!total) return '0.0%';
+  return `${((value / total) * 100).toFixed(1)}%`;
+}
+
+function escapeHtml(value: unknown): string {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+function compactText(value: unknown, maxLength = 140): string {
+  const text = String(value ?? '').trim().replace(/\s+/g, ' ');
+  if (text.length <= maxLength) return text;
+  return `${text.slice(0, maxLength - 1)}…`;
+}
+
+function quarterLabel(activity: Pick<ActivityForReport, 'q1' | 'q2' | 'q3' | 'q4'>): string {
+  const labels = [activity.q1 && 'Q1', activity.q2 && 'Q2', activity.q3 && 'Q3', activity.q4 && 'Q4'].filter(Boolean);
+  return labels.length ? labels.join(', ') : 'Not scheduled';
+}
+
+function groupBySubProgram(activities: ActivityForReport[]) {
+  const map = new Map<string, { name: string; activities: number; total: number; recurrent: number; developmentPartners: number }>();
+
+  for (const activity of activities) {
+    const name = activity.subProgram || 'Uncategorised';
+    const current = map.get(name) || { name, activities: 0, total: 0, recurrent: 0, developmentPartners: 0 };
+    current.activities += 1;
+    current.total += money(activity.estimatedCost);
+    current.recurrent += money(activity.recurrentBudget);
+    current.developmentPartners += money(activity.developmentPartners);
+    map.set(name, current);
+  }
+
+  return Array.from(map.values()).sort((a, b) => b.total - a.total);
+}
+
+function groupByBudgetCategory(activities: ActivityForReport[]) {
+  const map = new Map<string, { name: string; activities: number; total: number }>();
+
+  for (const activity of activities) {
+    const name = activity.budgetCategory || 'Uncategorised';
+    const current = map.get(name) || { name, activities: 0, total: 0 };
+    current.activities += 1;
+    current.total += money(activity.estimatedCost);
+    map.set(name, current);
+  }
+
+  return Array.from(map.values()).sort((a, b) => b.total - a.total);
+}
+
+function calculateMonthlyTotals(activities: ActivityForReport[]) {
+  const totals = Object.fromEntries(MONTHS.map((month) => [month, 0])) as Record<(typeof MONTHS)[number], number>;
+
+  for (const activity of activities) {
+    const monthly = allocateMonthly({
+      estimatedCost: money(activity.estimatedCost),
+      recurrentBudget: money(activity.recurrentBudget),
+      q1: activity.q1,
+      q2: activity.q2,
+      q3: activity.q3,
+      q4: activity.q4
+    });
+
+    for (const month of MONTHS) totals[month] += monthly[month];
+  }
+
+  return totals;
+}
+
+function buildReportHtml(plan: any): string {
+  const activities = plan.activities as ActivityForReport[];
+  const summary = summarizePlan(activities.map((activity) => ({
+    estimatedCost: money(activity.estimatedCost),
+    recurrentBudget: money(activity.recurrentBudget),
+    q1: activity.q1,
+    q2: activity.q2,
+    q3: activity.q3,
+    q4: activity.q4
+  })));
+
+  const totalEstimated = summary.totalEstimatedCost;
+  const totalRecurrent = summary.totalRecurrentBudget;
+  const ceiling = money(plan.ceilingAmount);
+  const ceilingVariance = ceiling - totalEstimated;
+  const subPrograms = groupBySubProgram(activities);
+  const budgetCategories = groupByBudgetCategory(activities);
+  const monthlyTotals = calculateMonthlyTotals(activities);
+  const topActivities = [...activities].sort((a, b) => money(b.estimatedCost) - money(a.estimatedCost)).slice(0, 10);
+  const today = new Date().toLocaleDateString('en-GB', { year: 'numeric', month: 'long', day: 'numeric' });
+
+  const subProgramRows = subPrograms.map((item) => `
+    <tr>
+      <td>${escapeHtml(item.name)}</td>
+      <td class="num">${item.activities}</td>
+      <td class="money">${formatVatu(item.total)}</td>
+      <td class="money">${formatVatu(item.recurrent)}</td>
+      <td class="money">${formatVatu(item.developmentPartners)}</td>
+      <td class="num">${percentage(item.total, totalEstimated)}</td>
+    </tr>
+  `).join('');
+
+  const budgetRows = budgetCategories.map((item) => `
+    <tr>
+      <td>${escapeHtml(item.name)}</td>
+      <td class="num">${item.activities}</td>
+      <td class="money">${formatVatu(item.total)}</td>
+      <td class="num">${percentage(item.total, totalEstimated)}</td>
+    </tr>
+  `).join('');
+
+  const topRows = topActivities.map((activity, index) => `
+    <tr>
+      <td class="num">${index + 1}</td>
+      <td><strong>${escapeHtml(activity.activityNumber || '-')}</strong><br><span>${escapeHtml(compactText(activity.activityDescription, 110))}</span></td>
+      <td>${escapeHtml(activity.subProgram || '-')}</td>
+      <td>${escapeHtml(quarterLabel(activity))}</td>
+      <td class="money">${formatVatu(money(activity.estimatedCost))}</td>
+    </tr>
+  `).join('');
+
+  const monthlyRows = MONTHS.map((month) => `
+    <tr>
+      <td>${month}</td>
+      <td class="money">${formatVatu(monthlyTotals[month])}</td>
+    </tr>
+  `).join('');
+
+  const q1 = monthlyTotals.January + monthlyTotals.February + monthlyTotals.March;
+  const q2 = monthlyTotals.April + monthlyTotals.May + monthlyTotals.June;
+  const q3 = monthlyTotals.July + monthlyTotals.August + monthlyTotals.September;
+  const q4 = monthlyTotals.October + monthlyTotals.November + monthlyTotals.December;
+
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>${escapeHtml(plan.title)} - Executive Report</title>
+  <style>
+    :root {
+      --ink: #0f172a;
+      --muted: #475569;
+      --line: #dbe3ef;
+      --soft: #f8fafc;
+      --brand: #0369a1;
+      --brand2: #6d28d9;
+      --good: #047857;
+      --warn: #b45309;
+      --bad: #be123c;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Arial, Helvetica, sans-serif;
+      color: var(--ink);
+      background: white;
+      line-height: 1.45;
+    }
+    .page {
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 34px;
+    }
+    .toolbar {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
+      padding: 12px 34px;
+      background: #0f172a;
+      color: white;
+      box-shadow: 0 8px 24px rgba(15, 23, 42, 0.2);
+    }
+    .toolbar button {
+      border: 0;
+      border-radius: 999px;
+      padding: 10px 16px;
+      font-weight: 700;
+      cursor: pointer;
+      color: #0f172a;
+      background: #38bdf8;
+    }
+    .cover {
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      padding: 32px;
+      background: linear-gradient(135deg, #f8fafc, #eef6ff);
+      margin-bottom: 24px;
+    }
+    .eyebrow {
+      color: var(--brand);
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      font-size: 12px;
+    }
+    h1 {
+      margin: 8px 0 8px;
+      font-size: 34px;
+      line-height: 1.1;
+    }
+    h2 {
+      margin: 28px 0 12px;
+      font-size: 20px;
+      border-bottom: 2px solid var(--line);
+      padding-bottom: 8px;
+    }
+    h3 { margin: 18px 0 8px; font-size: 15px; }
+    .meta {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+      margin-top: 22px;
+    }
+    .meta-card, .kpi, .note {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 14px;
+      background: white;
+    }
+    .label {
+      color: var(--muted);
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      font-weight: 700;
+    }
+    .value {
+      margin-top: 5px;
+      font-size: 16px;
+      font-weight: 800;
+    }
+    .kpis {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 12px;
+      margin: 18px 0 20px;
+    }
+    .kpi .value { font-size: 18px; }
+    .good { color: var(--good); }
+    .warn { color: var(--warn); }
+    .bad { color: var(--bad); }
+    .grid-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 18px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 10px 0 18px;
+      font-size: 12px;
+    }
+    th {
+      background: #eaf2fb;
+      color: #0f172a;
+      text-align: left;
+      border: 1px solid var(--line);
+      padding: 8px;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    td {
+      border: 1px solid var(--line);
+      padding: 8px;
+      vertical-align: top;
+    }
+    tr:nth-child(even) td { background: var(--soft); }
+    .num { text-align: right; white-space: nowrap; }
+    .money { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+    .summary-box {
+      border-left: 5px solid var(--brand);
+      background: #f8fafc;
+      padding: 14px 16px;
+      border-radius: 12px;
+      margin: 14px 0;
+    }
+    .footer {
+      margin-top: 36px;
+      color: var(--muted);
+      font-size: 11px;
+      text-align: center;
+      border-top: 1px solid var(--line);
+      padding-top: 14px;
+    }
+    @media print {
+      @page { size: A4 landscape; margin: 12mm; }
+      .toolbar { display: none; }
+      .page { max-width: none; padding: 0; }
+      .cover, .meta-card, .kpi, .note { break-inside: avoid; }
+      h2 { break-after: avoid; }
+      table { break-inside: auto; }
+      tr { break-inside: avoid; }
+    }
+  </style>
+</head>
+<body>
+  <div class="toolbar">
+    <div><strong>Executive Report Preview</strong> — use Print / Save as PDF</div>
+    <button onclick="window.print()">Print or Save PDF</button>
+  </div>
+
+  <main class="page">
+    <section class="cover">
+      <div class="eyebrow">Executive Business Plan Report</div>
+      <h1>${escapeHtml(plan.title)}</h1>
+      <p>${escapeHtml(plan.organization)} · ${escapeHtml(plan.facility)} · Budget Year ${escapeHtml(plan.year)}</p>
+      <div class="meta">
+        <div class="meta-card"><div class="label">Cost Centre</div><div class="value">${escapeHtml(plan.costCenter)}</div></div>
+        <div class="meta-card"><div class="label">Cost Centre Name</div><div class="value">${escapeHtml(plan.costCenterName)}</div></div>
+        <div class="meta-card"><div class="label">Status</div><div class="value">${escapeHtml(plan.status)}</div></div>
+        <div class="meta-card"><div class="label">Generated</div><div class="value">${escapeHtml(today)}</div></div>
+      </div>
+    </section>
+
+    <section>
+      <h2>1. Executive Summary</h2>
+      <div class="kpis">
+        <div class="kpi"><div class="label">Total Estimated Cost</div><div class="value">${formatVatu(totalEstimated)}</div></div>
+        <div class="kpi"><div class="label">Recurrent Budget</div><div class="value good">${formatVatu(totalRecurrent)}</div></div>
+        <div class="kpi"><div class="label">Ceiling</div><div class="value">${formatVatu(ceiling)}</div></div>
+        <div class="kpi"><div class="label">Ceiling Variance</div><div class="value ${ceilingVariance < 0 ? 'bad' : 'good'}">${formatVatu(ceilingVariance)}</div></div>
+        <div class="kpi"><div class="label">Activities</div><div class="value">${activities.length}</div></div>
+      </div>
+      <div class="summary-box">
+        This report summarizes ${activities.length} planned activities for ${escapeHtml(plan.facility)} under cost centre ${escapeHtml(plan.costCenter)}. The total estimated cost is <strong>${formatVatu(totalEstimated)}</strong>, with recurrent budget allocation of <strong>${formatVatu(totalRecurrent)}</strong>. The ceiling variance is <strong>${formatVatu(ceilingVariance)}</strong>.
+      </div>
+      <div class="grid-2">
+        <div class="note"><div class="label">Quarter Totals</div><div class="value">Q1 ${formatVatu(q1)} · Q2 ${formatVatu(q2)} · Q3 ${formatVatu(q3)} · Q4 ${formatVatu(q4)}</div></div>
+        <div class="note"><div class="label">Unfunded Amount</div><div class="value ${summary.unfundedCost > 0 ? 'bad' : 'good'}">${formatVatu(summary.unfundedCost)}</div></div>
+      </div>
+    </section>
+
+    <section>
+      <h2>2. Budget by Sub-Program</h2>
+      <table>
+        <thead>
+          <tr><th>Sub-Program</th><th class="num">Activities</th><th class="money">Estimated Cost</th><th class="money">Recurrent</th><th class="money">Development Partners</th><th class="num">Share</th></tr>
+        </thead>
+        <tbody>${subProgramRows}</tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>3. Budget by Category</h2>
+      <table>
+        <thead>
+          <tr><th>Budget Category</th><th class="num">Activities</th><th class="money">Estimated Cost</th><th class="num">Share</th></tr>
+        </thead>
+        <tbody>${budgetRows}</tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>4. Monthly Cashflow</h2>
+      <div class="grid-2">
+        <table>
+          <thead><tr><th>Month</th><th class="money">Cashflow</th></tr></thead>
+          <tbody>${monthlyRows}</tbody>
+        </table>
+        <table>
+          <thead><tr><th>Quarter</th><th class="money">Total</th></tr></thead>
+          <tbody>
+            <tr><td>Q1: January - March</td><td class="money">${formatVatu(q1)}</td></tr>
+            <tr><td>Q2: April - June</td><td class="money">${formatVatu(q2)}</td></tr>
+            <tr><td>Q3: July - September</td><td class="money">${formatVatu(q3)}</td></tr>
+            <tr><td>Q4: October - December</td><td class="money">${formatVatu(q4)}</td></tr>
+            <tr><td><strong>Annual Total</strong></td><td class="money"><strong>${formatVatu(q1 + q2 + q3 + q4)}</strong></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section>
+      <h2>5. Top 10 Cost Drivers</h2>
+      <table>
+        <thead>
+          <tr><th class="num">Rank</th><th>Activity</th><th>Sub-Program</th><th>Quarters</th><th class="money">Estimated Cost</th></tr>
+        </thead>
+        <tbody>${topRows}</tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>6. Governance Notes</h2>
+      <div class="summary-box">
+        Recommended review checks before submission: confirm that all activities have expenditure descriptions, verify quarter selections against procurement and training timelines, review over-ceiling variance, and confirm that recurrent budget totals match the costing and cashflow outputs.
+      </div>
+    </section>
+
+    <div class="footer">
+      Generated by VNH Business Plan Tool · ${escapeHtml(plan.organization)} · ${escapeHtml(today)}
+    </div>
+  </main>
+</body>
+</html>`;
+}
+
+export async function GET(_request: Request, { params }: RouteContext) {
+  const auth = await requireApiUser();
+  if (!auth.ok) return auth.response;
+
+  const departmentAccess = await requirePlanDepartmentAccess(auth.user, params.id);
+  if (!departmentAccess.ok) return departmentAccess.response;
+
+  const plan = await prisma.businessPlan.findUnique({
+    where: { id: params.id },
+    include: {
+      activities: {
+        orderBy: [
+          { sortOrder: 'asc' },
+          { activityNumber: 'asc' }
+        ]
+      }
+    }
+  });
+
+  if (!plan) {
+    return Response.json({ error: 'Business plan not found.' }, { status: 404 });
+  }
+
+  const html = buildReportHtml(plan);
+  const safeTitle = String(plan.title || 'business-plan').replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').toLowerCase();
+
+  return new Response(html, {
+    status: 200,
+    headers: {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Content-Disposition': `inline; filename="${safeTitle}-executive-report.html"`
+    }
+  });
+}

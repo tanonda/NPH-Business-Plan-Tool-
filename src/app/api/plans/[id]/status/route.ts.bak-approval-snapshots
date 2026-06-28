@@ -1,0 +1,114 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { prisma } from '@/lib/prisma';
+import { requireApiUser } from '@/lib/api-auth-guard';
+import { requirePlanDepartmentAccess } from '@/lib/department-access';
+import {
+  canTransitionStatus,
+  describeTransitionRule,
+  isPlanStatus,
+  normalizeWorkflowRole,
+  normalizeWorkflowStatus
+} from '@/lib/approval-workflow';
+
+export async function PATCH(
+  request: NextRequest,
+  { params }: { params: { id: string } }
+) {
+  const auth = await requireApiUser();
+  if (!auth.ok) return auth.response;
+
+  const departmentAccess = await requirePlanDepartmentAccess(auth.user, params.id);
+  if (!departmentAccess.ok) return departmentAccess.response;
+
+  try {
+    const body = await request.json();
+    const requestedStatus = String(body.status || '').toUpperCase();
+
+    if (!isPlanStatus(requestedStatus)) {
+      return NextResponse.json(
+        { error: 'Invalid status. Use DRAFT, REVIEW, APPROVED, or SUBMITTED.' },
+        { status: 400 }
+      );
+    }
+
+    const plan = await prisma.businessPlan.findUnique({
+      where: { id: params.id },
+      select: {
+        id: true,
+        status: true
+      }
+    });
+
+    if (!plan) {
+      return NextResponse.json({ error: 'Plan not found.' }, { status: 404 });
+    }
+
+    const currentStatus = normalizeWorkflowStatus(plan.status);
+    const role = normalizeWorkflowRole(auth.user.role);
+
+    if (currentStatus === requestedStatus) {
+      return NextResponse.json({
+        ok: true,
+        previousStatus: currentStatus,
+        status: requestedStatus,
+        message: `Plan is already ${requestedStatus}.`
+      });
+    }
+
+    if (!canTransitionStatus(currentStatus, requestedStatus, role)) {
+      return NextResponse.json(
+        {
+          error: describeTransitionRule(currentStatus, requestedStatus, role),
+          currentStatus,
+          requestedStatus,
+          role,
+          allowedStatuses: []
+        },
+        { status: 403 }
+      );
+    }
+
+    const updatedPlan = await prisma.businessPlan.update({
+      where: { id: params.id },
+      data: {
+        status: requestedStatus,
+        updatedById: auth.user.id
+      },
+      include: {
+        activities: {
+          orderBy: { sortOrder: 'asc' }
+        }
+      }
+    });
+
+    await prisma.auditLog.create({
+      data: {
+        action: `STATUS_${requestedStatus}`,
+        details: describeTransitionRule(currentStatus, requestedStatus, role),
+        businessPlanId: params.id,
+        userId: auth.user.id,
+        metadata: {
+          fromStatus: currentStatus,
+          toStatus: requestedStatus,
+          role,
+          workflow: 'DRAFT -> REVIEW -> APPROVED -> SUBMITTED'
+        }
+      }
+    }).catch(() => null);
+
+    return NextResponse.json({
+      ok: true,
+      plan: updatedPlan,
+      previousStatus: currentStatus,
+      status: requestedStatus,
+      message: describeTransitionRule(currentStatus, requestedStatus, role)
+    });
+  } catch (error) {
+    console.error('Status transition failed', error);
+
+    return NextResponse.json(
+      { error: 'Could not update plan status.' },
+      { status: 500 }
+    );
+  }
+}

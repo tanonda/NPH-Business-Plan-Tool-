@@ -1,7 +1,11 @@
+import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { canEditPlanContent, getPlanLockMessage } from '@/lib/plan-locking';
+import { requirePlanDepartmentAccess } from '@/lib/department-access';
 import { PlanSchema } from '@/lib/schemas';
 import { writeAuditLog } from '@/lib/auth';
 import { summarizePlan, toNumber } from '@/lib/business-plan-engine';
+import { requireApiUser, requireApiRole } from '@/lib/api-auth-guard';
 
 function withSummary(plan: any) {
   return {
@@ -18,7 +22,12 @@ function withSummary(plan: any) {
 }
 
 export async function GET(_: Request, { params }: { params: { id: string } }) {
-  const plan = await prisma.businessPlan.findUnique({
+  const auth = await requireApiUser();
+  if (!auth.ok) return auth.response;
+
+  const departmentAccess = await requirePlanDepartmentAccess(auth.user, params.id);
+  if (!departmentAccess.ok) return departmentAccess.response;
+const plan = await prisma.businessPlan.findUnique({
     where: { id: params.id },
     include: { activities: { orderBy: { sortOrder: 'asc' } } }
   });
@@ -27,9 +36,15 @@ export async function GET(_: Request, { params }: { params: { id: string } }) {
 }
 
 export async function PUT(request: Request, { params }: { params: { id: string } }) {
+  const auth = await requireApiRole(['ADMIN', 'PLANNER']);
+  if (!auth.ok) return auth.response;
+
+  const departmentAccess = await requirePlanDepartmentAccess(auth.user, params.id);
+  if (!departmentAccess.ok) return departmentAccess.response;
+
   const parsed = PlanSchema.parse(await request.json());
 
-  const plan = await prisma.$transaction(async (tx) => {
+  const plan = await prisma.$transaction(async (tx: any) => {
     await tx.activity.deleteMany({ where: { businessPlanId: params.id } });
     return tx.businessPlan.update({
       where: { id: params.id },
@@ -41,6 +56,8 @@ export async function PUT(request: Request, { params }: { params: { id: string }
         costCenterName: parsed.costCenterName,
         year: parsed.year,
         ceilingAmount: parsed.ceilingAmount,
+        departmentId: parsed.departmentId || null,
+        updatedById: auth.user.id,
         activities: {
           create: parsed.activities.map((a, index) => ({ ...a, sortOrder: a.sortOrder || index + 1 }))
         }
@@ -54,6 +71,12 @@ export async function PUT(request: Request, { params }: { params: { id: string }
 }
 
 export async function DELETE(_: Request, { params }: { params: { id: string } }) {
+  const auth = await requireApiRole(['ADMIN']);
+  if (!auth.ok) return auth.response;
+
+  const departmentAccess = await requirePlanDepartmentAccess(auth.user, params.id);
+  if (!departmentAccess.ok) return departmentAccess.response;
+
   const plan = await prisma.businessPlan.findUnique({ where: { id: params.id } });
   await prisma.businessPlan.delete({ where: { id: params.id } });
   await writeAuditLog({ action: 'PLAN_DELETED', details: `Deleted ${plan?.title || params.id}` });

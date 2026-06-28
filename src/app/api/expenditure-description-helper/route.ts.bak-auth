@@ -1,0 +1,279 @@
+import { NextRequest, NextResponse } from 'next/server';
+
+type ActivityInput = {
+  subProgram?: string;
+  corporatePlanKeyActivity?: string;
+  outputOrServiceTarget?: string;
+  targetForYear?: string;
+  responsibility?: string;
+  activityNumber?: string;
+  activityDescription?: string;
+  jobCode?: string;
+  expenditureDescription?: string;
+  estimatedCost?: number | string;
+  recurrentBudget?: number | string;
+  developmentPartners?: number | string;
+  q1?: boolean;
+  q2?: boolean;
+  q3?: boolean;
+  q4?: boolean;
+  funding?: string;
+  budgetCategory?: string;
+  accountCode?: string;
+};
+
+type HelperRequest = {
+  activity?: ActivityInput;
+  activities?: ActivityInput[];
+  mode?: 'single' | 'batch';
+};
+
+type DescriptionSuggestion = {
+  activityNumber: string;
+  suggestedDescription: string;
+  confidence: 'high' | 'medium' | 'low';
+  source: 'local-rules' | 'openai';
+  notes: string[];
+};
+
+const MONEY = new Intl.NumberFormat('en-VU', {
+  maximumFractionDigits: 0
+});
+
+function cleanText(value: unknown): string {
+  return String(value ?? '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function toNumber(value: unknown): number {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  const cleaned = String(value ?? '').replace(/[^0-9.-]/g, '');
+  const parsed = Number(cleaned);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function selectedQuarters(activity: ActivityInput): string[] {
+  const quarters: string[] = [];
+  if (activity.q1) quarters.push('Q1');
+  if (activity.q2) quarters.push('Q2');
+  if (activity.q3) quarters.push('Q3');
+  if (activity.q4) quarters.push('Q4');
+  return quarters;
+}
+
+function classifyActivity(activity: ActivityInput): string[] {
+  const text = [
+    activity.subProgram,
+    activity.activityDescription,
+    activity.budgetCategory,
+    activity.jobCode,
+    activity.accountCode
+  ].map(cleanText).join(' ').toLowerCase();
+
+  const buckets: string[] = [];
+
+  if (/training|scholarship|course|cme|cne|education|rotation|simulation|competenc|licen[cs]ing|workshop/.test(text)) {
+    buckets.push('training');
+  }
+  if (/software|digital|dashboard|system|database|registry|it|network|cyber|cloud|data|patient information/.test(text)) {
+    buckets.push('digital');
+  }
+  if (/biomedical|equipment|asset|calibration|maintenance|generator|hvac|plumbing|structural|carpentry|facility/.test(text)) {
+    buckets.push('equipment-maintenance');
+  }
+  if (/security|cleaning|catering|porter|concierge|toiletries|nutrition|nurse aide|support service/.test(text)) {
+    buckets.push('support-service');
+  }
+  if (/travel|outreach|retrieval|dispatch|aeromedical|ambulance|provincial|rotation|accommodation|per diem/.test(text)) {
+    buckets.push('travel-outreach');
+  }
+  if (/clinical|protocol|triage|audit|morbidity|mortality|research|quality|governance|patient|trauma|emergency|disaster/.test(text)) {
+    buckets.push('clinical-governance');
+  }
+  if (/pharmacy|laboratory|dental|physiotherapy|allied|oral|pocus|diagnostic/.test(text)) {
+    buckets.push('clinical-service');
+  }
+
+  return buckets.length ? buckets : ['general-operations'];
+}
+
+function phraseForBucket(bucket: string): string {
+  switch (bucket) {
+    case 'training':
+      return 'course fees, facilitator support, training materials, simulation consumables, participant travel, accommodation, per diem, insurance and competency assessment documentation';
+    case 'digital':
+      return 'software licensing, configuration, data migration, user training, cloud or server hosting, cybersecurity controls, reporting templates and ongoing technical support';
+    case 'equipment-maintenance':
+      return 'equipment procurement, preventive maintenance consumables, calibration, spare parts, commissioning, safety checks, asset tagging and service documentation';
+    case 'support-service':
+      return 'roster support, uniforms, PPE, consumables, service coordination materials, monitoring tools and operational supplies required for 24/7 service delivery';
+    case 'travel-outreach':
+      return 'domestic travel, accommodation, per diem, transport logistics, communication support, outreach coordination materials and reporting documentation';
+    case 'clinical-governance':
+      return 'clinical protocol development, audit tools, governance meetings, printing, data collection materials, supervision support and quality-improvement documentation';
+    case 'clinical-service':
+      return 'clinical consumables, diagnostic or treatment supplies, service coordination materials, equipment support, staff orientation and patient-care documentation';
+    default:
+      return 'operational supplies, coordination meetings, documentation, printing, staff orientation, service monitoring and administrative support';
+  }
+}
+
+function buildLocalSuggestion(activity: ActivityInput): DescriptionSuggestion {
+  const activityNumber = cleanText(activity.activityNumber) || 'NEW';
+  const activityDescription = cleanText(activity.activityDescription) || 'the planned activity';
+  const subProgram = cleanText(activity.subProgram) || 'the relevant department';
+  const budgetCategory = cleanText(activity.budgetCategory) || 'operations';
+  const jobCode = cleanText(activity.jobCode);
+  const accountCode = cleanText(activity.accountCode);
+  const responsibility = cleanText(activity.responsibility);
+  const funding = cleanText(activity.funding) || 'Recurrent';
+  const cost = toNumber(activity.recurrentBudget || activity.estimatedCost);
+  const quarters = selectedQuarters(activity);
+  const buckets = classifyActivity(activity);
+  const primaryBucket = buckets[0];
+
+  const costPhrase = cost > 0 ? ` The allocation is estimated at VT ${MONEY.format(cost)} under ${funding} funding.` : '';
+  const timingPhrase = quarters.length
+    ? ` Implementation is planned across ${quarters.join(', ')}.`
+    : ' Implementation timing should be confirmed before submission.';
+  const codePhrase = [jobCode && `job code ${jobCode}`, accountCode && `account code ${accountCode}`]
+    .filter(Boolean)
+    .join(' and ');
+  const responsibilityPhrase = responsibility ? ` Responsibility sits with ${responsibility}.` : '';
+
+  const suggestedDescription = [
+    `Expenditure will support ${activityDescription} within ${subProgram}.`,
+    `Funds cover ${phraseForBucket(primaryBucket)}.`,
+    codePhrase ? `Costs should be charged against ${codePhrase}.` : '',
+    timingPhrase,
+    costPhrase.trim(),
+    responsibilityPhrase.trim(),
+    `This supports the ${budgetCategory.toLowerCase()} requirements of the 2026 business plan.`
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  const notes: string[] = [];
+  if (!activity.activityDescription) notes.push('Missing activity description; suggestion uses a generic phrase.');
+  if (!cost) notes.push('No estimated/recurrent budget detected; cost phrase was minimized.');
+  if (!quarters.length) notes.push('No quarter markers selected; timing needs review.');
+  if (!jobCode && !accountCode) notes.push('No job/account code detected; coding line was omitted.');
+
+  return {
+    activityNumber,
+    suggestedDescription,
+    confidence: notes.length === 0 ? 'high' : notes.length <= 2 ? 'medium' : 'low',
+    source: 'local-rules',
+    notes
+  };
+}
+
+async function buildOpenAISuggestion(activity: ActivityInput): Promise<DescriptionSuggestion | null> {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) return null;
+
+  const local = buildLocalSuggestion(activity);
+  const prompt = `You are helping prepare a Vanuatu hospital business plan. Write one clear expenditure description paragraph for this activity. Use practical government-budget language. Do not invent vendors. Keep it under 90 words. Activity JSON: ${JSON.stringify(activity)}`;
+
+  try {
+    const response = await fetch('https://api.openai.com/v1/responses', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        model: process.env.OPENAI_MODEL || 'gpt-4.1-mini',
+        input: prompt,
+        temperature: 0.2
+      })
+    });
+
+    if (!response.ok) return local;
+    const data = await response.json();
+    const text = cleanText(data.output_text || data.output?.[0]?.content?.[0]?.text || '');
+    if (!text) return local;
+
+    return {
+      ...local,
+      suggestedDescription: text,
+      source: 'openai',
+      notes: local.notes
+    };
+  } catch {
+    return local;
+  }
+}
+
+export async function POST(request: NextRequest) {
+  try {
+    const body = (await request.json()) as HelperRequest;
+    const inputActivities = body.activities?.length
+      ? body.activities
+      : body.activity
+        ? [body.activity]
+        : [];
+
+    if (!inputActivities.length) {
+      return NextResponse.json(
+        { error: 'Provide either activity or activities in the request body.' },
+        { status: 400 }
+      );
+    }
+
+    const limitedActivities = inputActivities.slice(0, 100);
+    const useOpenAI = Boolean(process.env.OPENAI_API_KEY);
+
+    const suggestions = await Promise.all(
+      limitedActivities.map(async (activity) => {
+        if (useOpenAI) return await buildOpenAISuggestion(activity);
+        return buildLocalSuggestion(activity);
+      })
+    );
+
+    return NextResponse.json({
+      count: suggestions.length,
+      provider: useOpenAI ? 'openai-with-local-fallback' : 'local-rules',
+      suggestions
+    });
+  } catch (error) {
+    return NextResponse.json(
+      { error: 'Could not generate expenditure description suggestion.' },
+      { status: 500 }
+    );
+  }
+}
+
+export async function GET() {
+  return NextResponse.json({
+    name: 'Expenditure Description Helper',
+    status: 'ready',
+    usage: {
+      method: 'POST',
+      path: '/api/expenditure-description-helper',
+      body: {
+        activity: {
+          activityNumber: 'RB01.01',
+          subProgram: 'Management & Administration',
+          activityDescription: 'Implement autonomous ED organogram and staffing scale',
+          jobCode: '611180 VCH Administration',
+          estimatedCost: 1266000,
+          recurrentBudget: 1266000,
+          q1: true,
+          q2: true,
+          q3: true,
+          q4: true,
+          funding: 'Recurrent',
+          budgetCategory: 'Operations'
+        }
+      }
+    },
+    optionalEnv: {
+      OPENAI_API_KEY: 'When set, the route uses OpenAI with local fallback. Without it, it uses built-in local rules.',
+      OPENAI_MODEL: 'Optional. Defaults to gpt-4.1-mini.'
+    }
+  });
+}

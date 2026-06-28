@@ -1,0 +1,107 @@
+import { prisma } from '@/lib/prisma';
+import { writeAuditLog } from '@/lib/auth';
+import { summarizePlan, toNumber } from '@/lib/business-plan-engine';
+import { z } from 'zod';
+import { requireApiUser, requireApiRole } from '@/lib/api-auth-guard';
+
+const StatusSchema = z.object({
+  status: z.enum(['DRAFT', 'REVIEW', 'APPROVED', 'SUBMITTED'])
+});
+
+function normalizeMoney(value: unknown): number {
+  return toNumber(value == null ? 0 : String(value));
+}
+
+function buildSnapshot(plan: any, status: string) {
+  const activities = (plan.activities || []).map((activity: any) => ({
+    id: activity.id,
+    activityNumber: activity.activityNumber,
+    subProgram: activity.subProgram,
+    corporatePlanKeyActivity: activity.corporatePlanKeyActivity,
+    outputOrServiceTarget: activity.outputOrServiceTarget,
+    targetForYear: activity.targetForYear,
+    responsibility: activity.responsibility,
+    activityDescription: activity.activityDescription,
+    jobCode: activity.jobCode,
+    expenditureDescription: activity.expenditureDescription,
+    estimatedCost: normalizeMoney(activity.estimatedCost),
+    recurrentBudget: normalizeMoney(activity.recurrentBudget),
+    developmentPartners: normalizeMoney(activity.developmentPartners),
+    q1: activity.q1,
+    q2: activity.q2,
+    q3: activity.q3,
+    q4: activity.q4,
+    funding: activity.funding,
+    budgetCategory: activity.budgetCategory,
+    accountCode: activity.accountCode,
+    sortOrder: activity.sortOrder
+  }));
+
+  const summary = summarizePlan(activities.map((activity: any) => ({
+    estimatedCost: activity.estimatedCost,
+    recurrentBudget: activity.recurrentBudget,
+    q1: activity.q1,
+    q2: activity.q2,
+    q3: activity.q3,
+    q4: activity.q4
+  })));
+
+  return {
+    snapshotType: `VERSION_${status}`,
+    capturedAt: new Date().toISOString(),
+    plan: {
+      id: plan.id,
+      title: plan.title,
+      organization: plan.organization,
+      facility: plan.facility,
+      costCenter: plan.costCenter,
+      costCenterName: plan.costCenterName,
+      year: plan.year,
+      ceilingAmount: normalizeMoney(plan.ceilingAmount),
+      status: plan.status,
+      submittedAt: plan.submittedAt,
+      approvedAt: plan.approvedAt,
+      createdAt: plan.createdAt,
+      updatedAt: plan.updatedAt
+    },
+    summary,
+    activityCount: activities.length,
+    activities
+  };
+}
+
+export async function PATCH(request: Request, { params }: { params: { id: string } }) {
+  const auth = await requireApiRole(['ADMIN', 'APPROVER']);
+  if (!auth.ok) return auth.response;
+
+  const { status } = StatusSchema.parse(await request.json());
+  const now = new Date();
+
+  const plan = await prisma.businessPlan.update({
+    where: { id: params.id },
+    data: {
+      status,
+      submittedAt: status === 'SUBMITTED' ? now : null,
+      approvedAt: status === 'APPROVED' ? now : null
+    },
+    include: { activities: { orderBy: { sortOrder: 'asc' } } }
+  });
+
+  await writeAuditLog({
+    businessPlanId: plan.id,
+    action: `STATUS_${status}`,
+    details: `Status changed to ${status}`
+  });
+
+  if (status === 'SUBMITTED' || status === 'APPROVED') {
+    const snapshot = buildSnapshot(plan, status);
+
+    await writeAuditLog({
+      businessPlanId: plan.id,
+      action: `VERSION_SNAPSHOT_${status}`,
+      details: JSON.stringify(snapshot)
+    });
+  }
+
+  return Response.json(plan);
+}

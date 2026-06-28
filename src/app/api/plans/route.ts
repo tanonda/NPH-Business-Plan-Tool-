@@ -1,7 +1,9 @@
 import { prisma } from '@/lib/prisma';
+import { getDepartmentScopedPlanWhere } from '@/lib/department-access';
 import { summarizePlan, toNumber } from '@/lib/business-plan-engine';
 import { PlanSchema } from '@/lib/schemas';
 import { writeAuditLog } from '@/lib/auth';
+import { requireApiUser, requireApiRole } from '@/lib/api-auth-guard';
 
 function withSummary(plan: any) {
   return {
@@ -18,7 +20,12 @@ function withSummary(plan: any) {
 }
 
 export async function GET() {
-  const plans = await prisma.businessPlan.findMany({
+  const auth = await requireApiUser();
+  if (!auth.ok) return auth.response;  
+  
+  const departmentWhere = await getDepartmentScopedPlanWhere(auth.user);
+const plans = await prisma.businessPlan.findMany({
+    where: departmentWhere,
     include: { activities: { orderBy: { sortOrder: 'asc' } } },
     orderBy: { updatedAt: 'desc' }
   });
@@ -27,6 +34,8 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  const auth = await requireApiRole(['ADMIN', 'PLANNER']);
+  if (!auth.ok) return auth.response;
   const parsed = PlanSchema.parse(await request.json());
 
   const plan = await prisma.businessPlan.create({
@@ -38,6 +47,10 @@ export async function POST(request: Request) {
       costCenterName: parsed.costCenterName,
       year: parsed.year,
       ceilingAmount: parsed.ceilingAmount,
+      departmentId: parsed.departmentId || null,
+      ownerId: auth.user.id,
+      createdById: auth.user.id,
+      updatedById: auth.user.id,
       activities: {
         create: parsed.activities.map((a, index) => ({ ...a, sortOrder: a.sortOrder || index + 1 }))
       }

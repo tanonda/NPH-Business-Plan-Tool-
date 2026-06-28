@@ -1,0 +1,146 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
+import { prisma } from '@/lib/prisma';
+import { writeAuditLog } from '@/lib/auth';
+import { requireApiUser, requireApiRole } from '@/lib/api-auth-guard';
+
+export const dynamic = 'force-dynamic';
+
+const commentSchema = z.object({
+  comment: z.string().trim().min(1, 'Comment is required'),
+  stage: z.string().trim().optional().default('GENERAL'),
+  decision: z.string().trim().optional().default('COMMENT')
+});
+
+type RouteContext = {
+  params: {
+    id: string;
+  };
+};
+
+export async function GET(_request: NextRequest, context: RouteContext) {
+  const auth = await requireApiUser();
+  if (!auth.ok) return auth.response;
+
+  try {
+    const businessPlanId = context.params.id;
+
+    const comments = await prisma.auditLog.findMany({
+      where: {
+        businessPlanId,
+        action: 'APPROVAL_COMMENT'
+      },
+      orderBy: {
+        createdAt: 'desc'
+      },
+      include: {
+        user: {
+          select: {
+            name: true,
+            email: true
+          }
+        }
+      }
+    });
+
+    return NextResponse.json({
+      comments: comments.map((entry) => {
+        let parsed: Record<string, unknown> = {};
+
+        try {
+          parsed = entry.metadata && typeof entry.metadata === 'object'
+            ? (entry.metadata as Record<string, unknown>)
+            : {};
+        } catch {
+          parsed = {};
+        }
+
+        return {
+          id: entry.id,
+          planId: entry.businessPlanId,
+          comment: entry.details,
+          stage: parsed.stage || 'GENERAL',
+          decision: parsed.decision || 'COMMENT',
+          createdAt: entry.createdAt,
+          user: entry.user
+            ? {
+                name: entry.user.name,
+                email: entry.user.email
+              }
+            : {
+                name: 'System',
+                email: null
+              }
+        };
+      })
+    });
+  } catch (error) {
+    console.error('Failed to load approval comments:', error);
+    return NextResponse.json(
+      { error: 'Failed to load approval comments' },
+      { status: 500 }
+    );
+  }
+}
+
+export async function POST(request: NextRequest, context: RouteContext) {
+  const auth = await requireApiRole(['ADMIN', 'PLANNER', 'APPROVER', 'REVIEWER']);
+  if (!auth.ok) return auth.response;
+
+  try {
+    const businessPlanId = context.params.id;
+    const body = await request.json();
+    const data = commentSchema.parse(body);
+
+    const plan = await prisma.businessPlan.findUnique({
+      where: { id: businessPlanId },
+      select: {
+        id: true,
+        title: true
+      }
+    });
+
+    if (!plan) {
+      return NextResponse.json(
+        { error: 'Business plan not found' },
+        { status: 404 }
+      );
+    }
+
+    const audit = await writeAuditLog({
+      businessPlanId,
+      action: 'APPROVAL_COMMENT',
+      details: data.comment,
+      metadata: {
+        stage: data.stage,
+        decision: data.decision,
+        planTitle: plan.title
+      }
+    });
+
+    return NextResponse.json({
+      comment: {
+        id: audit.id,
+        planId: audit.businessPlanId,
+        comment: audit.details,
+        stage: data.stage,
+        decision: data.decision,
+        createdAt: audit.createdAt
+      }
+    });
+  } catch (error) {
+    console.error('Failed to save approval comment:', error);
+
+    if (error instanceof z.ZodError) {
+      return NextResponse.json(
+        { error: 'Invalid approval comment', issues: error.issues },
+        { status: 400 }
+      );
+    }
+
+    return NextResponse.json(
+      { error: 'Failed to save approval comment' },
+      { status: 500 }
+    );
+  }
+}
