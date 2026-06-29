@@ -23,7 +23,7 @@ type Department = {
   name?: string | null;
 };
 
-const ROLES: UserRole[] = ['ADMIN', 'PLANNER', 'APPROVER', 'REVIEWER', 'VIEWER'];
+const ROLES: UserRole[] = ['ADMIN', 'PLANNER', 'APPROVER', 'REVIEWER', 'ACCOUNTING', 'FINANCE', 'BUDGET_OFFICER', 'DONOR_MANAGER', 'VIEWER'];
 
 function roleDescription(role: UserRole) {
   switch (role) {
@@ -35,11 +35,32 @@ function roleDescription(role: UserRole) {
       return 'Approve, submit final, comment, export';
     case 'REVIEWER':
       return 'View, comment, export';
+    case 'ACCOUNTING':
+      return 'Commitments, expenditure, and budget checks';
+    case 'FINANCE':
+      return 'Finance clearance and budget approval';
+    case 'BUDGET_OFFICER':
+    case 'BUDGET_PLANNER':
+      return 'Budget ceilings, virements, and allocations';
+    case 'DONOR_MANAGER':
+      return 'Donor funding and restrictions';
     case 'VIEWER':
       return 'View and export only';
     default:
       return '';
   }
+}
+
+function formatLastLogin(lastLoginAt?: string | null) {
+  if (!lastLoginAt) return 'Never';
+
+  return new Date(lastLoginAt).toLocaleString(undefined, {
+    month: 'numeric',
+    day: 'numeric',
+    year: '2-digit',
+    hour: 'numeric',
+    minute: '2-digit'
+  });
 }
 
 export function UserManagementPanel() {
@@ -50,12 +71,15 @@ export function UserManagementPanel() {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
   const [creating, setCreating] = useState(false);
+  const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
+  const [bulkRole, setBulkRole] = useState<UserRole>('VIEWER');
+  const [bulkUpdating, setBulkUpdating] = useState(false);
 
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [role, setRole] = useState<UserRole>('VIEWER');
   const [password, setPassword] = useState('changeme123');
-  const [canAccessAllDepartments, setCanAccessAllDepartments] = useState(true);
+  const [canAccessAllDepartments, setCanAccessAllDepartments] = useState(false);
 
   const isAdmin = user?.role === 'ADMIN';
 
@@ -63,6 +87,19 @@ export function UserManagementPanel() {
     () => users.filter((item) => item.isActive).length,
     [users]
   );
+
+  const selectableUsers = useMemo(
+    () => users.filter((item) => item.id !== user?.id),
+    [user?.id, users]
+  );
+
+  const selectedUsers = useMemo(
+    () => users.filter((item) => selectedUserIds.includes(item.id)),
+    [selectedUserIds, users]
+  );
+
+  const allSelectableSelected =
+    selectableUsers.length > 0 && selectableUsers.every((item) => selectedUserIds.includes(item.id));
 
   async function loadUsers() {
     if (!isAdmin) return;
@@ -82,7 +119,11 @@ export function UserManagementPanel() {
       }
 
       const nextUsers = await usersRes.json();
-      setUsers(Array.isArray(nextUsers) ? nextUsers : []);
+      const safeUsers = Array.isArray(nextUsers) ? nextUsers : [];
+      setUsers(safeUsers);
+      setSelectedUserIds((current) =>
+        current.filter((id) => safeUsers.some((item: ManagedUser) => item.id === id && item.id !== user?.id))
+      );
 
       if (departmentsRes.ok) {
         const nextDepartments = await departmentsRes.json();
@@ -92,6 +133,7 @@ export function UserManagementPanel() {
       }
     } catch (error) {
       setUsers([]);
+      setSelectedUserIds([]);
       setMessage(error instanceof Error ? error.message : 'Could not load users.');
     } finally {
       setLoading(false);
@@ -133,7 +175,7 @@ export function UserManagementPanel() {
       setEmail('');
       setRole('VIEWER');
       setPassword('changeme123');
-      setCanAccessAllDepartments(true);
+      setCanAccessAllDepartments(false);
       setMessage('User created.');
       await loadUsers();
     } catch (error) {
@@ -165,6 +207,38 @@ export function UserManagementPanel() {
     }
   }
 
+  async function bulkUpdateUsers(patch: Partial<ManagedUser>) {
+    if (selectedUsers.length === 0) return;
+
+    setBulkUpdating(true);
+    setMessage(`Updating ${selectedUsers.length} users...`);
+
+    try {
+      const targets = selectedUsers.filter((item) => item.id !== user?.id);
+
+      for (const target of targets) {
+        const res = await fetch(`/api/users/${target.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(patch)
+        });
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.error || `Could not update ${target.email}.`);
+        }
+      }
+
+      setSelectedUserIds([]);
+      setMessage(`Updated ${targets.length} users.`);
+      await loadUsers();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Bulk update failed.');
+    } finally {
+      setBulkUpdating(false);
+    }
+  }
+
   async function resetPassword(targetUser: ManagedUser) {
     const nextPassword = window.prompt(
       `New temporary password for ${targetUser.email}`,
@@ -174,6 +248,23 @@ export function UserManagementPanel() {
     if (!nextPassword) return;
 
     await updateUser(targetUser.id, { password: nextPassword });
+  }
+
+  function toggleUserSelection(userId: string) {
+    if (userId === user?.id) return;
+
+    setSelectedUserIds((current) =>
+      current.includes(userId) ? current.filter((id) => id !== userId) : [...current, userId]
+    );
+  }
+
+  function toggleSelectAll() {
+    if (allSelectableSelected) {
+      setSelectedUserIds([]);
+      return;
+    }
+
+    setSelectedUserIds(selectableUsers.map((item) => item.id));
   }
 
   if (userLoading) {
@@ -200,7 +291,7 @@ export function UserManagementPanel() {
         </div>
       </div>
 
-      <form onSubmit={createUser} className="grid cols-4" style={{ marginTop: 16 }}>
+      <form onSubmit={createUser} className="grid cols-4 user-create-form" style={{ marginTop: 16 }}>
         <label>
           Name
           <input value={name} onChange={(event) => setName(event.target.value)} required />
@@ -259,17 +350,77 @@ export function UserManagementPanel() {
 
       {message && <p className="muted" style={{ marginTop: 12 }}>{message}</p>}
 
-      <div className="table-wrap" style={{ marginTop: 16 }}>
-        <table>
+      <div className="table-bulk-toolbar user-table-toolbar">
+        <label className="compact-checkbox">
+          <input
+            type="checkbox"
+            checked={allSelectableSelected}
+            onChange={toggleSelectAll}
+            disabled={selectableUsers.length === 0 || loading}
+          />
+          Select all users
+        </label>
+
+        <span className="selected-count-pill">
+          {selectedUsers.length} selected
+        </span>
+
+        <div className="bulk-actions">
+          <button
+            type="button"
+            className="secondary"
+            onClick={() => void bulkUpdateUsers({ isActive: true })}
+            disabled={selectedUsers.length === 0 || bulkUpdating}
+          >
+            Activate
+          </button>
+
+          <button
+            type="button"
+            className="secondary"
+            onClick={() => void bulkUpdateUsers({ isActive: false })}
+            disabled={selectedUsers.length === 0 || bulkUpdating}
+          >
+            Deactivate
+          </button>
+
+          <select
+            value={bulkRole}
+            onChange={(event) => setBulkRole(event.target.value as UserRole)}
+            disabled={selectedUsers.length === 0 || bulkUpdating}
+            aria-label="Bulk role"
+          >
+            {ROLES.map((nextRole) => (
+              <option key={nextRole} value={nextRole}>{nextRole}</option>
+            ))}
+          </select>
+
+          <button
+            type="button"
+            className="secondary"
+            onClick={() => void bulkUpdateUsers({ role: bulkRole })}
+            disabled={selectedUsers.length === 0 || bulkUpdating}
+          >
+            Set role
+          </button>
+
+          {selectedUsers.length > 0 && (
+            <button type="button" className="ghost-button" onClick={() => setSelectedUserIds([])}>
+              Clear
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div className="table-wrap user-table-wrap" style={{ marginTop: 10 }}>
+        <table className="user-management-table compact-user-table optimized-user-table">
           <thead>
             <tr>
               <th>User</th>
-              <th>Email</th>
               <th>Role</th>
               <th>Status</th>
-              <th>All departments</th>
-              <th>Assigned departments</th>
-              <th>Last login</th>
+              <th>Department access</th>
+              <th>Last seen</th>
               <th>Actions</th>
             </tr>
           </thead>
@@ -277,91 +428,100 @@ export function UserManagementPanel() {
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={8}>Loading users...</td>
+                <td colSpan={6}>Loading users...</td>
               </tr>
             ) : users.length === 0 ? (
               <tr>
-                <td colSpan={8}>
+                <td colSpan={6}>
                   No users found. Click Refresh. If this stays empty, check whether /api/users returns 200.
                 </td>
               </tr>
             ) : (
-              users.map((item) => (
-                <tr key={item.id}>
-                  <td>{item.name}</td>
-                  <td>{item.email}</td>
+              users.map((item) => {
+                const isCurrentUser = item.id === user?.id;
+                const selected = selectedUserIds.includes(item.id);
 
-                  <td>
-                    <select
-                      value={item.role}
-                      onChange={(event) =>
-                        void updateUser(item.id, { role: event.target.value as UserRole })
-                      }
-                      disabled={item.id === user?.id}
-                    >
-                      {ROLES.map((nextRole) => (
-                        <option key={nextRole} value={nextRole}>
-                          {nextRole}
-                        </option>
-                      ))}
-                    </select>
-                  </td>
+                return (
+                  <tr key={item.id} className={`user-management-row ${selected ? 'is-selected' : ''}`}>
+                    <td className="user-identity-cell">
+                      <label className="inline-row-selector">
+                        <input
+                          type="checkbox"
+                          checked={selected}
+                          disabled={isCurrentUser}
+                          onChange={() => toggleUserSelection(item.id)}
+                          title={isCurrentUser ? 'You cannot bulk-edit your own account.' : `Select ${item.email}`}
+                          aria-label={`Select ${item.email}`}
+                        />
+                        <span>
+                          <strong>{item.name || 'Unnamed user'}</strong>
+                          <small>{item.email}</small>
+                        </span>
+                      </label>
+                    </td>
 
-                  <td>
-                    <span className={`badge ${item.isActive ? 'good' : 'warn'}`}>
-                      {item.isActive ? 'Active' : 'Inactive'}
-                    </span>
-                  </td>
-
-                  <td>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <input
-                        type="checkbox"
-                        checked={Boolean(item.canAccessAllDepartments)}
+                    <td className="role-cell">
+                      <select
+                        value={item.role}
                         onChange={(event) =>
-                          void updateUser(item.id, {
-                            canAccessAllDepartments: event.target.checked
-                          })
+                          void updateUser(item.id, { role: event.target.value as UserRole })
                         }
+                        disabled={isCurrentUser}
+                        aria-label={`Role for ${item.email}`}
+                      >
+                        {ROLES.map((nextRole) => (
+                          <option key={nextRole} value={nextRole}>
+                            {nextRole}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+
+                    <td className="status-cell">
+                      <span className={`badge ${item.isActive ? 'good' : 'warn'}`}>
+                        {item.isActive ? 'Active' : 'Inactive'}
+                      </span>
+                    </td>
+
+                    <td className="department-access-cell">
+                      <UserDepartmentAccessEditor
+                        userId={item.id}
+                        departments={departments}
+                        initialDepartmentIds={item.departmentIds || []}
+                        role={item.role}
+                        canAccessAllDepartments={Boolean(item.canAccessAllDepartments)}
+                        onAccessModeChange={(nextAccessAll) =>
+                          updateUser(item.id, { canAccessAllDepartments: nextAccessAll })
+                        }
+                        onSaved={() => void loadUsers()}
                       />
-                      All
-                    </label>
-                  </td>
+                    </td>
 
-                  <td>
-                    <UserDepartmentAccessEditor
-                      userId={item.id}
-                      departments={departments}
-                      initialDepartmentIds={item.departmentIds || []}
-                      disabled={Boolean(item.canAccessAllDepartments)}
-                      onSaved={() => void loadUsers()}
-                    />
-                  </td>
+                    <td className="last-login-cell">
+                      {formatLastLogin(item.lastLoginAt)}
+                    </td>
 
-                  <td>
-                    {item.lastLoginAt ? new Date(item.lastLoginAt).toLocaleString() : 'Never'}
-                  </td>
-
-                  <td className="actions">
-                    <button
-                      type="button"
-                      className="secondary"
-                      onClick={() => void resetPassword(item)}
-                    >
-                      Reset password
-                    </button>
-
-                    <button
-                      type="button"
-                      className={item.isActive ? 'danger' : 'secondary'}
-                      onClick={() => void updateUser(item.id, { isActive: !item.isActive })}
-                      disabled={item.id === user?.id}
-                    >
-                      {item.isActive ? 'Deactivate' : 'Activate'}
-                    </button>
-                  </td>
-                </tr>
-              ))
+                    <td className="user-actions-cell">
+                      <details className="row-actions-menu">
+                        <summary aria-label={`Actions for ${item.email}`}>Actions</summary>
+                        <div className="row-actions-menu__panel">
+                          <button type="button" onClick={() => void resetPassword(item)}>
+                            Reset password
+                          </button>
+                          <button
+                            type="button"
+                            className={item.isActive ? 'danger-text' : ''}
+                            disabled={isCurrentUser}
+                            onClick={() => void updateUser(item.id, { isActive: !item.isActive })}
+                          >
+                            {item.isActive ? 'Deactivate' : 'Activate'}
+                          </button>
+                        </div>
+                      </details>
+                    </td>
+                  </tr>
+                );
+              })
             )}
           </tbody>
         </table>

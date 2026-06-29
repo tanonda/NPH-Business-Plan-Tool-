@@ -4,7 +4,7 @@ import { hashPassword } from '@/lib/auth';
 import { validatePasswordPolicy, passwordPolicyMessage } from '@/lib/password-policy';
 import { requireApiRole } from '@/lib/api-auth-guard';
 
-const ALLOWED_ROLES = ['ADMIN', 'PLANNER', 'APPROVER', 'REVIEWER', 'VIEWER'] as const;
+const ALLOWED_ROLES = ['ADMIN', 'PLANNER', 'APPROVER', 'REVIEWER', 'ACCOUNTING', 'FINANCE', 'BUDGET_OFFICER', 'DONOR_MANAGER', 'VIEWER'] as const;
 type AllowedRole = typeof ALLOWED_ROLES[number];
 
 function normalizeRole(role: unknown): AllowedRole {
@@ -61,7 +61,7 @@ export async function POST(request: NextRequest) {
     const name = String(body.name || '').trim();
     const password = String(body.password || '').trim();
     const role = normalizeRole(body.role);
-    const canAccessAllDepartments = Boolean(body.canAccessAllDepartments ?? true);
+    const canAccessAllDepartments = Boolean(body.canAccessAllDepartments ?? false);
 
     if (!email || !email.includes('@')) {
       return NextResponse.json({ error: 'Valid email is required.' }, { status: 400 });
@@ -116,7 +116,8 @@ export async function POST(request: NextRequest) {
         metadata: {
           createdUserId: user.id,
           createdUserEmail: email,
-          role
+          role,
+          canAccessAllDepartments
         }
       }
     }).catch(() => null);

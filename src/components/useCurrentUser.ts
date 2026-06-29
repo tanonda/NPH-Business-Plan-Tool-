@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 
-export type UserRole = 'ADMIN' | 'PLANNER' | 'APPROVER' | 'REVIEWER' | 'VIEWER';
+export type UserRole = 'ADMIN' | 'PLANNER' | 'APPROVER' | 'REVIEWER' | 'ACCOUNTING' | 'FINANCE' | 'BUDGET_OFFICER' | 'DONOR_MANAGER' | 'VIEWER' | 'BUDGET_PLANNER'; // BUDGET_PLANNER is legacy-only and hidden from role pickers.
 
 export type CurrentUser = {
   id: string;

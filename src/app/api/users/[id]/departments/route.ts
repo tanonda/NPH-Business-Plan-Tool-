@@ -2,6 +2,34 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { requireApiRole } from '@/lib/api-auth-guard';
 
+type DepartmentAccessLevel = 'OWNER' | 'EDITOR' | 'REVIEWER' | 'VIEWER';
+
+const ACCESS_LEVELS: DepartmentAccessLevel[] = ['OWNER', 'EDITOR', 'REVIEWER', 'VIEWER'];
+
+function normalizeAccessLevel(value: unknown, role?: string): DepartmentAccessLevel {
+  const explicit = String(value || '').toUpperCase();
+  if (ACCESS_LEVELS.includes(explicit as DepartmentAccessLevel)) {
+    return explicit as DepartmentAccessLevel;
+  }
+
+  switch (String(role || '').toUpperCase()) {
+    case 'ADMIN':
+    case 'PLANNER':
+    case 'ACCOUNTING':
+    case 'FINANCE':
+    case 'BUDGET_OFFICER':
+    case 'BUDGET_PLANNER':
+      return 'EDITOR';
+    case 'DONOR_MANAGER':
+      return 'REVIEWER';
+    case 'APPROVER':
+    case 'REVIEWER':
+      return 'REVIEWER';
+    default:
+      return 'VIEWER';
+  }
+}
+
 export async function GET(
   _request: NextRequest,
   { params }: { params: { id: string } }
@@ -15,6 +43,7 @@ export async function GET(
       id: true,
       email: true,
       name: true,
+      role: true,
       canAccessAllDepartments: true
     }
   });
@@ -49,12 +78,14 @@ export async function PATCH(
 
   const user = await prisma.user.findUnique({
     where: { id: params.id },
-    select: { id: true, email: true }
+    select: { id: true, email: true, role: true }
   });
 
   if (!user) {
     return NextResponse.json({ error: 'User not found.' }, { status: 404 });
   }
+
+  const accessLevel = normalizeAccessLevel(body.accessLevel, user.role);
 
   await prisma.$transaction([
     prisma.userDepartmentAccess.deleteMany({
@@ -65,7 +96,8 @@ export async function PATCH(
           prisma.userDepartmentAccess.createMany({
             data: departmentIds.map((departmentId: string) => ({
               userId: params.id,
-              departmentId
+              departmentId,
+              accessLevel: accessLevel as any
             })),
             skipDuplicates: true
           })
@@ -75,13 +107,14 @@ export async function PATCH(
 
   await prisma.auditLog.create({
     data: {
-      action: 'USER_DEPARTMENT_ACCESS_UPDATED',
+      action: 'DEPARTMENT_ACCESS_GRANTED' as any,
       details: `Updated department access for ${user.email}.`,
       userId: auth.user.id,
       metadata: {
         updatedUserId: user.id,
         updatedUserEmail: user.email,
-        departmentIds
+        departmentIds,
+        accessLevel
       }
     }
   }).catch(() => null);
@@ -89,6 +122,7 @@ export async function PATCH(
   return NextResponse.json({
     ok: true,
     userId: params.id,
-    departmentIds
+    departmentIds,
+    accessLevel
   });
 }

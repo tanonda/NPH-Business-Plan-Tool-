@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { canEditPlanContent, getPlanLockMessage } from '@/lib/plan-locking';
-import { requirePlanDepartmentAccess } from '@/lib/department-access';
+import { requirePlanDepartmentAccess, requirePlanDepartmentEditAccess, requireResolvedDepartmentEditAccess } from '@/lib/department-access';
 import { PlanSchema } from '@/lib/schemas';
 import { writeAuditLog } from '@/lib/auth';
 import { summarizePlan, toNumber } from '@/lib/business-plan-engine';
 import { requireApiUser, requireApiRole } from '@/lib/api-auth-guard';
+import { resolvePlanCeilingForSave } from '@/lib/budget-ceiling';
 
 function withSummary(plan: any) {
   return {
@@ -39,10 +40,37 @@ export async function PUT(request: Request, { params }: { params: { id: string }
   const auth = await requireApiRole(['ADMIN', 'PLANNER']);
   if (!auth.ok) return auth.response;
 
-  const departmentAccess = await requirePlanDepartmentAccess(auth.user, params.id);
+  const departmentAccess = await requirePlanDepartmentEditAccess(auth.user, params.id);
   if (!departmentAccess.ok) return departmentAccess.response;
 
+  const existingPlan = await prisma.businessPlan.findUnique({
+    where: { id: params.id },
+    select: { id: true, status: true, ceilingAmount: true }
+  });
+
+  if (!existingPlan) {
+    return NextResponse.json({ error: 'Business plan not found.' }, { status: 404 });
+  }
+
+  if (!canEditPlanContent(existingPlan.status, auth.user.role)) {
+    return NextResponse.json(
+      { error: getPlanLockMessage(existingPlan.status, auth.user.role), status: existingPlan.status, role: auth.user.role },
+      { status: 403 }
+    );
+  }
+
   const parsed = PlanSchema.parse(await request.json());
+
+  const targetDepartmentAccess = await requireResolvedDepartmentEditAccess(auth.user, parsed.departmentId || null, parsed.costCenter || null);
+  if (!targetDepartmentAccess.ok) return targetDepartmentAccess.response;
+
+  const savedCeilingAmount = await resolvePlanCeilingForSave({
+    role: auth.user.role,
+    requestedCeilingAmount: parsed.ceilingAmount,
+    costCenterCode: parsed.costCenter,
+    fiscalYear: parsed.year,
+    existingCeilingAmount: existingPlan.ceilingAmount
+  });
 
   const plan = await prisma.$transaction(async (tx: any) => {
     await tx.activity.deleteMany({ where: { businessPlanId: params.id } });
@@ -55,8 +83,9 @@ export async function PUT(request: Request, { params }: { params: { id: string }
         costCenter: parsed.costCenter,
         costCenterName: parsed.costCenterName,
         year: parsed.year,
-        ceilingAmount: parsed.ceilingAmount,
-        departmentId: parsed.departmentId || null,
+        ceilingAmount: savedCeilingAmount,
+        ceilingJustification: parsed.ceilingJustification || '',
+        departmentId: targetDepartmentAccess.departmentId || null,
         updatedById: auth.user.id,
         activities: {
           create: parsed.activities.map((a, index) => ({ ...a, sortOrder: a.sortOrder || index + 1 }))

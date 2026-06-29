@@ -37,7 +37,8 @@ export async function requireApiRole(allowedRoles: string[]): Promise<ApiAuthRes
   const auth = await requireApiUser();
   if (!auth.ok) return auth;
 
-  const role = String(auth.user.role || '');
+  const rawRole = String(auth.user.role || '');
+  const role = rawRole === 'BUDGET_PLANNER' ? 'BUDGET_OFFICER' : rawRole;
   if (!allowedRoles.includes(role)) {
     return {
       ok: false,

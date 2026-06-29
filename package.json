@@ -11,7 +11,9 @@
     "prisma:push": "prisma db push",
     "seed": "tsx prisma/seed.ts",
     "db:backup": "bash scripts/backup-db.sh",
-    "db:restore": "bash scripts/restore-db.sh"
+    "db:restore": "bash scripts/restore-db.sh",
+    "seed:reference": "tsx scripts/seed-reference-data.ts",
+    "seed:all": "tsx prisma/seed.ts && tsx scripts/seed-reference-data.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",

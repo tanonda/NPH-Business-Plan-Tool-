@@ -17,7 +17,14 @@ function getDefaultAdminName() {
 }
 
 function getDefaultAdminPassword() {
-  return process.env.DEFAULT_ADMIN_PASSWORD || 'admin123';
+  const configuredPassword = process.env.DEFAULT_ADMIN_PASSWORD;
+  if (configuredPassword) return configuredPassword;
+
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('DEFAULT_ADMIN_PASSWORD is required in production.');
+  }
+
+  return 'admin123';
 }
 
 function hashSessionToken(token: string): string {

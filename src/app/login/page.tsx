@@ -5,8 +5,8 @@ import { useRouter } from 'next/navigation';
 
 export default function LoginPage() {
   const router = useRouter();
-  const [email, setEmail] = useState('admin@vnh.local');
-  const [password, setPassword] = useState('admin123');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -38,61 +38,92 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center px-4">
-      <section className="w-full max-w-md rounded-2xl border border-slate-800 bg-slate-900/90 shadow-2xl p-8">
-        <div className="mb-8">
-          <p className="text-sm uppercase tracking-[0.3em] text-cyan-400">VNH ED</p>
-          <h1 className="mt-3 text-3xl font-bold">Business Plan Login</h1>
-          <p className="mt-2 text-sm text-slate-400">
-            Sign in to manage business plans, approvals, exports, and audit history.
-          </p>
-        </div>
+    <main className="login-shell">
+      <section className="login-frame" aria-label="VNH business plan login">
+        <aside className="login-brand-panel">
+          <div className="login-brand-mark">VNH</div>
+          <div>
+            <p className="login-eyebrow">Vila Central Hospital</p>
+            <h1>Business Plan Control Platform</h1>
+            <p className="login-brand-copy">
+              Manage planning, approval workflow, budget controls, snapshots, exports,
+              and accounting visibility from one secure workspace.
+            </p>
+          </div>
 
-        <form onSubmit={handleSubmit} className="space-y-5">
-          <label className="block">
-            <span className="text-sm font-medium text-slate-300">Email</span>
-            <input
-              type="email"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-slate-100 outline-none focus:border-cyan-400"
-              autoComplete="email"
-              required
-            />
-          </label>
-
-          <label className="block">
-            <span className="text-sm font-medium text-slate-300">Password</span>
-            <input
-              type="password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-slate-100 outline-none focus:border-cyan-400"
-              autoComplete="current-password"
-              required
-            />
-          </label>
-
-          {error && (
-            <div className="rounded-xl border border-red-500/40 bg-red-950/40 px-4 py-3 text-sm text-red-200">
-              {error}
+          <div className="login-feature-grid" aria-label="Platform highlights">
+            <div>
+              <strong>Budget Control</strong>
+              <span>Ceilings, donor funds, commitments and remaining balances.</span>
             </div>
+            <div>
+              <strong>Approval Workflow</strong>
+              <span>Planner, approver, accounting and finance review gates.</span>
+            </div>
+            <div>
+              <strong>Audit Ready</strong>
+              <span>Snapshots, exports, comments and action history.</span>
+            </div>
+          </div>
+        </aside>
+
+        <section className="login-card">
+          <div className="login-card-header">
+            <p className="login-eyebrow dark">Secure access</p>
+            <h2>Sign in</h2>
+            <p>Use your assigned account to continue to the business planning dashboard.</p>
+          </div>
+
+          <form onSubmit={handleSubmit} className="login-form">
+            <div className="login-field">
+              <label htmlFor="login-email">Email address</label>
+              <input
+                id="login-email"
+                name="email"
+                type="email"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                autoComplete="email"
+                placeholder="name@vnh.local"
+                required
+              />
+            </div>
+
+            <div className="login-field">
+              <label htmlFor="login-password">Password</label>
+              <input
+                id="login-password"
+                name="password"
+                type="password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                autoComplete="current-password"
+                placeholder="Enter your password"
+                required
+              />
+            </div>
+
+            {error && (
+              <div className="login-error" role="alert">
+                {error}
+              </div>
+            )}
+
+            <button type="submit" disabled={loading} className="login-submit">
+              {loading ? 'Signing in...' : 'Sign in to dashboard'}
+            </button>
+          </form>
+
+          {process.env.NODE_ENV !== 'production' && (
+            <details className="login-dev-default">
+              <summary>Development login</summary>
+              <div>
+                <p>Use the account created by your seed settings.</p>
+                <p>Set DEFAULT_ADMIN_EMAIL and DEFAULT_ADMIN_PASSWORD in your local environment.</p>
+              </div>
+            </details>
           )}
-
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full rounded-xl bg-cyan-500 px-4 py-3 font-semibold text-slate-950 hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {loading ? 'Signing in...' : 'Sign in'}
-          </button>
-        </form>
-
-        <div className="mt-6 rounded-xl border border-slate-800 bg-slate-950/70 p-4 text-xs text-slate-400">
-          <p className="font-semibold text-slate-300">Development default</p>
-          <p className="mt-1">Email: admin@vnh.local</p>
-          <p>Password: admin123</p>
-        </div>
+        </section>
       </section>
     </main>
   );

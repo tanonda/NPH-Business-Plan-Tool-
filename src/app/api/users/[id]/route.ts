@@ -4,7 +4,7 @@ import { hashPassword } from '@/lib/auth';
 import { validatePasswordPolicy, passwordPolicyMessage } from '@/lib/password-policy';
 import { requireApiRole } from '@/lib/api-auth-guard';
 
-const ALLOWED_ROLES = ['ADMIN', 'PLANNER', 'APPROVER', 'REVIEWER', 'VIEWER'] as const;
+const ALLOWED_ROLES = ['ADMIN', 'PLANNER', 'APPROVER', 'REVIEWER', 'ACCOUNTING', 'FINANCE', 'BUDGET_OFFICER', 'DONOR_MANAGER', 'VIEWER'] as const;
 type AllowedRole = typeof ALLOWED_ROLES[number];
 
 function normalizeRole(role: unknown): AllowedRole | null {
@@ -69,6 +69,8 @@ export async function PATCH(
     }
 
     if (typeof body.canAccessAllDepartments === 'boolean') {
+      // ADMIN decides whether a user has global department access.
+      // Default remains false on creation, but Finance/Accounting/Budget users can be explicitly granted all departments.
       data.canAccessAllDepartments = body.canAccessAllDepartments;
     }
 

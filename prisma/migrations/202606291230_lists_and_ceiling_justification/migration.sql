@@ -1,0 +1,1 @@
+ALTER TABLE "BusinessPlan" ADD COLUMN IF NOT EXISTS "ceilingJustification" TEXT NOT NULL DEFAULT '';

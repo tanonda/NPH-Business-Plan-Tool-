@@ -12,7 +12,11 @@ function hashPassword(password: string): string {
 async function main() {
   const adminEmail = process.env.DEFAULT_ADMIN_EMAIL || 'admin@vnh.local';
   const adminName = process.env.DEFAULT_ADMIN_NAME || 'Business Plan Admin';
-  const adminPassword = process.env.DEFAULT_ADMIN_PASSWORD || 'admin123';
+  const adminPassword = process.env.DEFAULT_ADMIN_PASSWORD || (process.env.NODE_ENV === 'production' ? '' : 'admin123');
+
+  if (!adminPassword) {
+    throw new Error('DEFAULT_ADMIN_PASSWORD is required when seeding production.');
+  }
 
   const admin = await prisma.user.upsert({
     where: { email: adminEmail },
@@ -88,7 +92,8 @@ async function main() {
               recurrentBudget: 1266000,
               developmentPartners: 0,
               accountCode: '8CEC - Consultants Fees',
-              budgetCategory: 'Administration',
+              activityCategory: 'Administration Support',
+              budgetCategory: 'Finance_HR',
               q1: true,
               q2: true,
               q3: false,
@@ -109,7 +114,8 @@ async function main() {
               recurrentBudget: 15000000,
               developmentPartners: 0,
               accountCode: '8EET - Computer Software Purchases',
-              budgetCategory: 'Digital Systems',
+              activityCategory: 'System Evaluation ',
+              budgetCategory: 'Assets_Infra',
               q1: true,
               q2: true,
               q3: true,
@@ -120,7 +126,7 @@ async function main() {
         },
         auditLogs: {
           create: {
-            action: 'SEEDED_PLAN',
+            action: 'PLAN_CREATED' as any,
             details: 'Seeded default VNH ED 2026 Business Plan.',
             userId: admin.id,
             metadata: {

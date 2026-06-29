@@ -54,7 +54,7 @@ export function comparePlanToSnapshot(currentPlan: any, snapshotRecord: any) {
   if (!snapshotPlan) return { hasSnapshot: false, changes: [], summary: { added: 0, removed: 0, changed: 0 } };
 
   const changes: any[] = [];
-  const planFields = ['title', 'facility', 'costCenter', 'costCenterName', 'year', 'ceilingAmount', 'status'];
+  const planFields = ['title', 'facility', 'costCenter', 'costCenterName', 'year', 'ceilingAmount', 'ceilingJustification', 'status'];
 
   for (const field of planFields) {
     const before = field === 'ceilingAmount' ? number(snapshotPlan[field]) : text(snapshotPlan[field]);

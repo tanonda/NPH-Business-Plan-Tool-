@@ -66,7 +66,7 @@ export function ApprovalCommentsPanel({
   const role = user?.role || 'VIEWER';
 
   const canComment = useMemo(() => {
-    return role === 'ADMIN' || role === 'PLANNER' || role === 'APPROVER' || role === 'REVIEWER';
+    return role === 'ADMIN' || role === 'PLANNER' || role === 'APPROVER' || role === 'REVIEWER' || role === 'ACCOUNTING' || role === 'FINANCE' || role === 'BUDGET_OFFICER' || role === 'DONOR_MANAGER';
   }, [role]);
 
   async function loadComments() {

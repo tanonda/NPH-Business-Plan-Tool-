@@ -26,14 +26,26 @@ enum Role {
   PLANNER
   APPROVER
   REVIEWER
+  ACCOUNTING
+  FINANCE
+  BUDGET_OFFICER
+  BUDGET_PLANNER
+  DONOR_MANAGER
   VIEWER
 }
 
 enum PlanStatus {
   DRAFT
   REVIEW
+  RETURNED
+  BUDGET_REVIEW
+  FINANCE_REVIEW
+  BUDGET_CLEARED
   APPROVED
   SUBMITTED
+  EXECUTION
+  REJECTED
+  LOCKED
 }
 
 enum DepartmentAccessLevel {
@@ -120,6 +132,8 @@ model Department {
   facility       String?
   costCenter     String?
   costCenterName String?
+  budgetCeilings DepartmentBudgetCeiling[]
+  costCenters    CostCenter[]
   isActive       Boolean  @default(true)
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
@@ -155,6 +169,7 @@ model BusinessPlan {
   costCenter     String
   costCenterName String
   ceilingAmount  Decimal    @default(0) @db.Decimal(18, 2)
+  ceilingJustification String @default("")
   status         PlanStatus @default(DRAFT)
 
   departmentId   String?
@@ -180,6 +195,9 @@ model BusinessPlan {
   versionSnapshots VersionSnapshot[]
   notifications    Notification[]
   exportHistory     ExportHistory[]
+  commitments       Commitment[]
+  expenditures      Expenditure[]
+  donorFundAllocations DonorFundAllocation[]
 
   @@index([year])
   @@index([status])
@@ -214,9 +232,17 @@ model Activity {
   q4                       Boolean      @default(false)
 
   funding                  String       @default("Recurrent")
-  budgetCategory           String       @default("Operations")
+  budgetCategory           String       @default("Admin")
   accountCode              String       @default("")
+  costCenterCode           String       @default("")
+  nsdpTarget               String       @default("")
+  activityCategory         String       @default("")
+  fundingSourceId          String?
+  approvedBudget           Decimal      @default(0) @db.Decimal(18, 2)
   sortOrder                Int          @default(0)
+
+  commitments              Commitment[]
+  expenditures             Expenditure[]
 
   createdAt                DateTime     @default(now())
   updatedAt                DateTime     @updatedAt
@@ -286,6 +312,282 @@ model VersionSnapshot {
   @@index([createdAt])
 }
 
+
+
+enum FundingSourceType {
+  GOVERNMENT_RECURRENT
+  GOVERNMENT_DEVELOPMENT
+  DONOR_GRANT
+  DEVELOPMENT_PARTNER
+  OTHER
+}
+
+enum FundingConfirmationStatus {
+  PENDING
+  CONFIRMED
+  WITHDRAWN
+}
+
+enum CommitmentStatus {
+  DRAFT
+  COMMITTED
+  PARTIALLY_PAID
+  PAID
+  CANCELLED
+}
+
+model ReferenceList {
+  id          String          @id @default(cuid())
+  key         String          @unique
+  name        String
+  description String          @default("")
+  items       ReferenceItem[]
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+}
+
+model ReferenceItem {
+  id              String        @id @default(cuid())
+  referenceListId String
+  referenceList   ReferenceList @relation(fields: [referenceListId], references: [id], onDelete: Cascade)
+  code            String        @default("")
+  label           String
+  description     String        @default("")
+  category        String        @default("")
+  sortOrder       Int           @default(0)
+  isActive        Boolean       @default(true)
+  metadata        Json?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  @@index([referenceListId])
+  @@index([code])
+  @@index([category])
+  @@index([isActive])
+}
+
+model CostCenter {
+  id             String      @id @default(cuid())
+  code           String      @unique
+  name           String
+  departmentId   String?
+  department     Department? @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  ministryCode   String      @default("MOH")
+  facility       String      @default("Vila Central Hospital")
+  isActive       Boolean     @default(true)
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  allocations    BudgetAllocation[]
+  commitments    Commitment[]
+  expenditures   Expenditure[]
+
+  @@index([departmentId])
+  @@index([isActive])
+}
+
+model AccountCode {
+  id             String   @id @default(cuid())
+  code           String   @unique
+  description    String
+  budgetCategory String
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  allocations    BudgetAllocation[]
+  commitments    Commitment[]
+  expenditures   Expenditure[]
+
+  @@index([budgetCategory])
+  @@index([isActive])
+}
+
+model FundingSource {
+  id                 String                    @id @default(cuid())
+  name               String
+  type               FundingSourceType         @default(GOVERNMENT_RECURRENT)
+  donorName          String                    @default("")
+  confirmationStatus FundingConfirmationStatus @default(CONFIRMED)
+  restrictionType    String                    @default("FLEXIBLE")
+  allowedCategories  Json?
+  startDate          DateTime?
+  endDate            DateTime?
+  isActive           Boolean                   @default(true)
+  createdAt          DateTime                  @default(now())
+  updatedAt          DateTime                  @updatedAt
+
+  allocations         BudgetAllocation[]
+  donorFundAllocations DonorFundAllocation[]
+
+  @@index([type])
+  @@index([confirmationStatus])
+  @@index([isActive])
+}
+
+model MinistryBudget {
+  id             String   @id @default(cuid())
+  fiscalYear     Int
+  ministryCode   String   @default("MOH")
+  ministryName   String   @default("Ministry of Health")
+  approvedCeiling Decimal @default(0) @db.Decimal(18, 2)
+  revisedCeiling  Decimal @default(0) @db.Decimal(18, 2)
+  notes          String   @default("")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  departmentCeilings DepartmentBudgetCeiling[]
+
+  @@unique([fiscalYear, ministryCode])
+  @@index([fiscalYear])
+}
+
+model DepartmentBudgetCeiling {
+  id                String        @id @default(cuid())
+  fiscalYear        Int
+  ministryBudgetId  String?
+  ministryBudget    MinistryBudget? @relation(fields: [ministryBudgetId], references: [id], onDelete: SetNull)
+  departmentId      String?
+  department        Department?   @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  costCenterCode    String
+  approvedCeiling   Decimal       @default(0) @db.Decimal(18, 2)
+  supplementary     Decimal       @default(0) @db.Decimal(18, 2)
+  virementsIn       Decimal       @default(0) @db.Decimal(18, 2)
+  virementsOut      Decimal       @default(0) @db.Decimal(18, 2)
+  restrictedFunds   Decimal       @default(0) @db.Decimal(18, 2)
+  withdrawnFunds    Decimal       @default(0) @db.Decimal(18, 2)
+  notes             String        @default("")
+  createdById       String?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  allocations       BudgetAllocation[]
+
+  @@unique([fiscalYear, costCenterCode])
+  @@index([departmentId])
+  @@index([fiscalYear])
+}
+
+model BudgetAllocation {
+  id                        String       @id @default(cuid())
+  fiscalYear                Int
+  departmentBudgetCeilingId String?
+  departmentBudgetCeiling   DepartmentBudgetCeiling? @relation(fields: [departmentBudgetCeilingId], references: [id], onDelete: SetNull)
+  costCenterId              String?
+  costCenter                CostCenter?  @relation(fields: [costCenterId], references: [id], onDelete: SetNull)
+  fundingSourceId           String?
+  fundingSource             FundingSource? @relation(fields: [fundingSourceId], references: [id], onDelete: SetNull)
+  accountCodeId             String?
+  accountCode               AccountCode? @relation(fields: [accountCodeId], references: [id], onDelete: SetNull)
+  approvedAmount            Decimal      @default(0) @db.Decimal(18, 2)
+  revisedAmount             Decimal      @default(0) @db.Decimal(18, 2)
+  availableAmount           Decimal      @default(0) @db.Decimal(18, 2)
+  status                    String       @default("ACTIVE")
+  notes                     String       @default("")
+  createdAt                 DateTime     @default(now())
+  updatedAt                 DateTime     @updatedAt
+
+  @@index([fiscalYear])
+  @@index([costCenterId])
+  @@index([fundingSourceId])
+}
+
+model BudgetVirement {
+  id                  String   @id @default(cuid())
+  fiscalYear          Int
+  fromCostCenterCode  String
+  toCostCenterCode    String
+  fromAccountCode     String   @default("")
+  toAccountCode       String   @default("")
+  amount              Decimal  @default(0) @db.Decimal(18, 2)
+  reason              String
+  status              String   @default("PENDING")
+  approvedById        String?
+  approvedAt          DateTime?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@index([fiscalYear])
+  @@index([status])
+}
+
+model DonorFundAllocation {
+  id               String       @id @default(cuid())
+  donorName        String
+  fundingSourceId  String?
+  fundingSource    FundingSource? @relation(fields: [fundingSourceId], references: [id], onDelete: SetNull)
+  businessPlanId   String?
+  businessPlan     BusinessPlan? @relation(fields: [businessPlanId], references: [id], onDelete: Cascade)
+  activityId       String?
+  amount           Decimal      @default(0) @db.Decimal(18, 2)
+  confirmedAmount  Decimal      @default(0) @db.Decimal(18, 2)
+  pendingAmount    Decimal      @default(0) @db.Decimal(18, 2)
+  conditions       String       @default("")
+  status           FundingConfirmationStatus @default(PENDING)
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  @@index([businessPlanId])
+  @@index([activityId])
+  @@index([status])
+}
+
+model Commitment {
+  id             String          @id @default(cuid())
+  businessPlanId String?
+  businessPlan   BusinessPlan?   @relation(fields: [businessPlanId], references: [id], onDelete: Cascade)
+  activityId     String?
+  activity       Activity?       @relation(fields: [activityId], references: [id], onDelete: SetNull)
+  costCenterId   String?
+  costCenter     CostCenter?     @relation(fields: [costCenterId], references: [id], onDelete: SetNull)
+  costCenterCode String          @default("")
+  accountCodeId  String?
+  accountCode    AccountCode?    @relation(fields: [accountCodeId], references: [id], onDelete: SetNull)
+  accountCodeText String         @default("")
+  lpoNumber      String          @default("")
+  supplier       String          @default("")
+  description    String
+  amount         Decimal         @default(0) @db.Decimal(18, 2)
+  status         CommitmentStatus @default(COMMITTED)
+  committedDate  DateTime        @default(now())
+  createdById    String?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  @@index([businessPlanId])
+  @@index([activityId])
+  @@index([costCenterCode])
+  @@index([status])
+}
+
+model Expenditure {
+  id              String       @id @default(cuid())
+  businessPlanId  String?
+  businessPlan    BusinessPlan? @relation(fields: [businessPlanId], references: [id], onDelete: Cascade)
+  activityId      String?
+  activity        Activity?    @relation(fields: [activityId], references: [id], onDelete: SetNull)
+  costCenterId    String?
+  costCenter      CostCenter?  @relation(fields: [costCenterId], references: [id], onDelete: SetNull)
+  costCenterCode  String       @default("")
+  accountCodeId   String?
+  accountCode     AccountCode? @relation(fields: [accountCodeId], references: [id], onDelete: SetNull)
+  accountCodeText String       @default("")
+  voucherNumber   String       @default("")
+  invoiceNumber   String       @default("")
+  supplier        String       @default("")
+  description     String
+  amount          Decimal      @default(0) @db.Decimal(18, 2)
+  expenditureDate DateTime     @default(now())
+  sourceSystem    String       @default("MANUAL")
+  createdById     String?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  @@index([businessPlanId])
+  @@index([activityId])
+  @@index([costCenterCode])
+  @@index([expenditureDate])
+}
 
 model ApprovalSnapshot {
   id                 String   @id @default(cuid())

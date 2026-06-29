@@ -326,7 +326,7 @@ export async function POST(request: Request) {
       q3: booleanMark(cellValue(row, resolvedColumns.q3)),
       q4: booleanMark(cellValue(row, resolvedColumns.q4)),
       funding: text(cellValue(row, resolvedColumns.funding)) || 'Recurrent',
-      budgetCategory: text(cellValue(row, resolvedColumns.budgetCategory)) || 'Operations',
+      budgetCategory: text(cellValue(row, resolvedColumns.budgetCategory)) || 'Admin',
       accountCode: text(cellValue(row, resolvedColumns.accountCode)),
       sortOrder: activities.length + 1
     };

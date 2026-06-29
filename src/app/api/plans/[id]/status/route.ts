@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { PlanStatus as PrismaPlanStatus } from '@prisma/client';
 import { createApprovalSnapshot } from '@/lib/approval-snapshots';
 import { notifyPlanStakeholders } from '@/lib/notification-service';
 import { validatePlanForSubmission } from '@/lib/plan-validation';
 import { prisma } from '@/lib/prisma';
 import { requireApiUser } from '@/lib/api-auth-guard';
-import { requirePlanDepartmentAccess } from '@/lib/department-access';
+import { requirePlanDepartmentAccess, requirePlanDepartmentEditAccess, requirePlanDepartmentReviewAccess } from '@/lib/department-access';
 import {
   canTransitionStatus,
   describeTransitionRule,
@@ -21,20 +22,27 @@ export async function PATCH(
   const auth = await requireApiUser();
   if (!auth.ok) return auth.response;
 
-  const departmentAccess = await requirePlanDepartmentAccess(auth.user, params.id);
+  const roleForAccess = String(auth.user.role || '').toUpperCase();
+  const departmentAccess = roleForAccess === 'PLANNER'
+    ? await requirePlanDepartmentEditAccess(auth.user, params.id)
+    : roleForAccess === 'APPROVER'
+      ? await requirePlanDepartmentReviewAccess(auth.user, params.id)
+      : await requirePlanDepartmentAccess(auth.user, params.id);
   if (!departmentAccess.ok) return departmentAccess.response;
 
   try {
     const body = await request.json();
-    const requestedStatus = String(body.status || '').toUpperCase();
+    const rawRequestedStatus = String(body.status || '').toUpperCase();
     const reason = String(body.reason || body.comment || '').trim();
 
-    if (!isPlanStatus(requestedStatus)) {
+    if (!isPlanStatus(rawRequestedStatus)) {
       return NextResponse.json(
-        { error: 'Invalid status. Use DRAFT, REVIEW, APPROVED, or SUBMITTED.' },
+        { error: 'Invalid status. Use DRAFT, REVIEW, RETURNED, APPROVED, SUBMITTED, or REJECTED.' },
         { status: 400 }
       );
     }
+
+    const requestedStatus = rawRequestedStatus as PrismaPlanStatus;
 
     const plan = await prisma.businessPlan.findUnique({
       where: { id: params.id },
@@ -80,7 +88,7 @@ export async function PATCH(
       );
     }
 
-    if (requestedStatus === 'REVIEW' || requestedStatus === 'APPROVED' || requestedStatus === 'SUBMITTED') {
+    if (['REVIEW', 'APPROVED', 'SUBMITTED'].includes(requestedStatus)) {
       const issues = validatePlanForSubmission(plan as any);
       if (issues.length > 0) {
         return NextResponse.json(
@@ -106,7 +114,7 @@ export async function PATCH(
       }
     });
 
-    if (requestedStatus === 'REVIEW' || requestedStatus === 'APPROVED' || requestedStatus === 'SUBMITTED') {
+    if (['REVIEW', 'APPROVED', 'SUBMITTED'].includes(requestedStatus)) {
       await createApprovalSnapshot(params.id, requestedStatus, {
         id: auth.user.id,
         name: auth.user.name,
@@ -119,7 +127,7 @@ export async function PATCH(
     if (returnTransition || reason) {
       await prisma.auditLog.create({
         data: {
-          action: returnTransition ? 'APPROVAL_COMMENT' : 'STATUS_NOTE',
+          action: (returnTransition ? 'APPROVAL_COMMENT' : 'APPROVAL_COMMENT') as any,
           details: reason,
           businessPlanId: params.id,
           userId: auth.user.id,
@@ -139,7 +147,7 @@ export async function PATCH(
 
     await prisma.auditLog.create({
       data: {
-        action: `STATUS_${requestedStatus}`,
+        action: `STATUS_${requestedStatus}` as any,
         details: transitionMessage,
         businessPlanId: params.id,
         userId: auth.user.id,
@@ -148,7 +156,7 @@ export async function PATCH(
           toStatus: requestedStatus,
           role,
           reason: reason || null,
-          workflow: 'DRAFT -> REVIEW -> APPROVED -> SUBMITTED with return-to-planner support'
+          workflow: 'DRAFT -> REVIEW -> APPROVED -> SUBMITTED with return/rejection support'
         }
       }
     }).catch(() => null);

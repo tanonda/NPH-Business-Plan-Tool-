@@ -21,12 +21,14 @@ type ActivityInput = {
   funding?: string;
   budgetCategory?: string;
   accountCode?: string;
+  costCenterCode?: string;
 };
 
 type HelperRequest = {
   activity?: ActivityInput;
   activities?: ActivityInput[];
   mode?: 'single' | 'batch';
+  operation?: 'create' | 'optimize';
 };
 
 type DescriptionSuggestion = {
@@ -172,12 +174,46 @@ function buildLocalSuggestion(activity: ActivityInput): DescriptionSuggestion {
   };
 }
 
-async function buildOpenAISuggestion(activity: ActivityInput): Promise<DescriptionSuggestion | null> {
+function buildLocalOptimization(activity: ActivityInput): DescriptionSuggestion {
+  const local = buildLocalSuggestion(activity);
+  const existing = cleanText(activity.expenditureDescription);
+  const activityNumber = cleanText(activity.activityNumber) || local.activityNumber;
+
+  if (!existing) return local;
+
+  const codeHints = [
+    activity.jobCode ? `job code ${cleanText(activity.jobCode)}` : '',
+    activity.accountCode ? `account code ${cleanText(activity.accountCode)}` : '',
+    activity.costCenterCode ? `cost center ${cleanText(activity.costCenterCode)}` : ''
+  ].filter(Boolean).join(', ');
+
+  const timing = selectedQuarters(activity).length ? ` Planned timing: ${selectedQuarters(activity).join(', ')}.` : '';
+  const cost = toNumber(activity.recurrentBudget || activity.estimatedCost);
+  const costText = cost > 0 ? ` Estimated recurrent budget: VT ${MONEY.format(cost)}.` : '';
+  const coding = codeHints ? ` Coding reference: ${codeHints}.` : '';
+
+  const suggestedDescription = `${existing.replace(/\s+/g, ' ').replace(/[.\s]*$/, '.')}${coding}${timing}${costText}`
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  return {
+    activityNumber,
+    suggestedDescription,
+    confidence: local.confidence,
+    source: 'local-rules',
+    notes: ['Optimized existing planner-written description.', ...local.notes]
+  };
+}
+
+
+async function buildOpenAISuggestion(activity: ActivityInput, operation: 'create' | 'optimize' = 'create'): Promise<DescriptionSuggestion | null> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) return null;
 
-  const local = buildLocalSuggestion(activity);
-  const prompt = `You are helping prepare a Vanuatu hospital business plan. Write one clear expenditure description paragraph for this activity. Use practical government-budget language. Do not invent vendors. Keep it under 90 words. Activity JSON: ${JSON.stringify(activity)}`;
+  const local = operation === 'optimize' ? buildLocalOptimization(activity) : buildLocalSuggestion(activity);
+  const prompt = operation === 'optimize'
+    ? `You are helping prepare a Vanuatu hospital business plan. Improve the existing expenditure description without changing its meaning. Use practical government-budget language, keep planner intent, include relevant coding/timing only when supported by the data, do not invent vendors, and keep it under 100 words. Activity JSON: ${JSON.stringify(activity)}`
+    : `You are helping prepare a Vanuatu hospital business plan. Write one clear expenditure description paragraph for this activity. Use practical government-budget language. Do not invent vendors. Keep it under 90 words. Activity JSON: ${JSON.stringify(activity)}`;
 
   try {
     const response = await fetch('https://api.openai.com/v1/responses', {
@@ -229,12 +265,13 @@ export async function POST(request: NextRequest) {
     }
 
     const limitedActivities = inputActivities.slice(0, 100);
+    const operation = body.operation === 'optimize' ? 'optimize' : 'create';
     const useOpenAI = Boolean(process.env.OPENAI_API_KEY);
 
     const suggestions = await Promise.all(
       limitedActivities.map(async (activity) => {
-        if (useOpenAI) return await buildOpenAISuggestion(activity);
-        return buildLocalSuggestion(activity);
+        if (useOpenAI) return await buildOpenAISuggestion(activity, operation);
+        return operation === 'optimize' ? buildLocalOptimization(activity) : buildLocalSuggestion(activity);
       })
     );
 
@@ -271,7 +308,7 @@ export async function GET() {
           q3: true,
           q4: true,
           funding: 'Recurrent',
-          budgetCategory: 'Operations'
+          budgetCategory: 'Admin'
         }
       }
     },

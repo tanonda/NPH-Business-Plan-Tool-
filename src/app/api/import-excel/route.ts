@@ -74,7 +74,7 @@ export async function POST(request: Request) {
       q3: isMarked(row.getCell(12).value),
       q4: isMarked(row.getCell(13).value),
       funding: 'Recurrent',
-      budgetCategory: 'Operations',
+      budgetCategory: 'Admin',
       accountCode: '',
       sortOrder: activities.length + 1
     };

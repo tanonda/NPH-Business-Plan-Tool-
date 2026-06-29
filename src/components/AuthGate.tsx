@@ -44,11 +44,18 @@ export function AuthGate({ children }: { children: ReactNode }) {
 
   if (authState !== 'authenticated') {
     return (
-      <main className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center px-6">
-        <section className="max-w-md w-full rounded-2xl border border-slate-800 bg-slate-900/80 p-8 shadow-2xl">
-          <div className="text-sm uppercase tracking-[0.3em] text-cyan-300">VNH Business Plan</div>
-          <h1 className="mt-4 text-2xl font-semibold">Checking your session…</h1>
-          <p className="mt-3 text-sm text-slate-400">You will be redirected to login if your session is not valid.</p>
+      <main className="auth-check-shell">
+        <section className="auth-check-card" aria-live="polite">
+          <div className="auth-check-orbit" aria-hidden="true">
+            <span />
+            <span />
+            <span />
+          </div>
+          <div className="auth-check-mark">VNH</div>
+          <p className="auth-check-eyebrow">Business Plan Platform</p>
+          <h1>Checking your session…</h1>
+          <p className="auth-check-copy">Securing your dashboard and loading the right role access.</p>
+          <div className="auth-check-progress" aria-hidden="true"><span /></div>
         </section>
       </main>
     );

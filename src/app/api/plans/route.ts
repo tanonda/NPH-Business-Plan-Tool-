@@ -1,9 +1,10 @@
 import { prisma } from '@/lib/prisma';
-import { getDepartmentScopedPlanWhere } from '@/lib/department-access';
+import { getDepartmentScopedPlanWhere, requireResolvedDepartmentEditAccess } from '@/lib/department-access';
 import { summarizePlan, toNumber } from '@/lib/business-plan-engine';
 import { PlanSchema } from '@/lib/schemas';
 import { writeAuditLog } from '@/lib/auth';
 import { requireApiUser, requireApiRole } from '@/lib/api-auth-guard';
+import { resolvePlanCeilingForSave } from '@/lib/budget-ceiling';
 
 function withSummary(plan: any) {
   return {
@@ -38,6 +39,16 @@ export async function POST(request: Request) {
   if (!auth.ok) return auth.response;
   const parsed = PlanSchema.parse(await request.json());
 
+  const departmentAccess = await requireResolvedDepartmentEditAccess(auth.user, parsed.departmentId || null, parsed.costCenter || null);
+  if (!departmentAccess.ok) return departmentAccess.response;
+
+  const savedCeilingAmount = await resolvePlanCeilingForSave({
+    role: auth.user.role,
+    requestedCeilingAmount: parsed.ceilingAmount,
+    costCenterCode: parsed.costCenter,
+    fiscalYear: parsed.year
+  });
+
   const plan = await prisma.businessPlan.create({
     data: {
       title: parsed.title,
@@ -46,8 +57,9 @@ export async function POST(request: Request) {
       costCenter: parsed.costCenter,
       costCenterName: parsed.costCenterName,
       year: parsed.year,
-      ceilingAmount: parsed.ceilingAmount,
-      departmentId: parsed.departmentId || null,
+      ceilingAmount: savedCeilingAmount,
+      ceilingJustification: parsed.ceilingJustification || '',
+      departmentId: departmentAccess.departmentId || null,
       ownerId: auth.user.id,
       createdById: auth.user.id,
       updatedById: auth.user.id,
