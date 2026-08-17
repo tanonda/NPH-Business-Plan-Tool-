@@ -123,6 +123,35 @@ td.money, th.money { text-align: right; font-variant-numeric: tabular-nums; }
 .quarters label { display: flex; gap: 7px; align-items: center; color: #0f172a; padding: 7px 10px; border: 1px solid #cbd5e1; border-radius: 999px; background: #f8fafc; }
 .muted { color: var(--muted); }
 .footer-note { margin-top: 18px; color: var(--muted); font-size: 13px; }
+.eyebrow { margin: 0 0 7px; color: var(--brand-3); font-size: 12px; font-weight: 900; letter-spacing: .11em; text-transform: uppercase; }
+.transformation-panel { margin: 18px 0; background: linear-gradient(145deg, #ffffff 0%, #f0fdfa 100%); border-color: #bfe5dc; }
+.transformation-heading { align-items: flex-start; }
+.transformation-heading h2 { max-width: 720px; }
+.alignment-flow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 18px 0; padding: 13px 15px; border: 1px solid #99d7cc; border-radius: 14px; background: #ecfdf5; color: #115e59; font-size: 13px; font-weight: 850; }
+.alignment-flow b { color: #0f766e; font-size: 18px; }
+.alignment-budget { display: grid; grid-template-columns: 190px 230px minmax(0, 1fr); gap: 14px; align-items: center; margin-bottom: 22px; padding: 14px; border-radius: 14px; background: #fffbeb; border: 1px solid #fcd34d; }
+.alignment-budget div { padding-right: 14px; border-right: 1px solid #fcd34d; }
+.alignment-budget span, .alignment-budget strong { display: block; }
+.alignment-budget span { color: #92400e; font-size: 12px; font-weight: 800; }
+.alignment-budget strong { margin-top: 4px; color: #78350f; font-size: 17px; letter-spacing: -.02em; }
+.alignment-budget p { margin: 0; color: #78350f; font-size: 13px; line-height: 1.5; }
+.pillar-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-bottom: 22px; }
+.pillar-card { display: grid; grid-template-columns: 36px 1fr; gap: 11px; padding: 13px; border: 1px solid #d1fae5; border-radius: 14px; background: rgba(255, 255, 255, .8); }
+.pillar-number { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 9px; background: #0f766e; color: #fff; font-size: 12px; font-weight: 900; }
+.pillar-card h4, .roadmap-card h4, .workforce-card h4 { margin: 0 0 5px; color: #0f2a44; font-size: 14px; }
+.pillar-card p, .roadmap-card p, .workforce-card p { margin: 0; color: #475569; font-size: 13px; line-height: 1.45; }
+.pillar-card strong { display: block; margin-top: 8px; color: #0f766e; font-size: 13px; }
+.roadmap-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-bottom: 22px; }
+.roadmap-card { position: relative; min-height: 144px; padding: 13px; border: 1px solid #dbeafe; border-radius: 14px; background: #fff; }
+.roadmap-card > span { color: #1d4ed8; font-size: 12px; font-weight: 900; }
+.roadmap-card h4 { margin-top: 5px; }
+.roadmap-card em { position: absolute; bottom: 12px; left: 13px; color: #64748b; font-size: 11px; font-style: normal; font-weight: 900; text-transform: uppercase; }
+.roadmap-card em.current { color: #0f766e; }
+.workforce-heading { display: flex; justify-content: space-between; gap: 18px; margin-top: 6px; }
+.workforce-heading h3 { margin-bottom: 5px; }
+.workforce-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.workforce-card { padding: 14px; border: 1px solid #cbd5e1; border-radius: 14px; background: #fff; }
+.workforce-card ul { margin: 11px 0 0; padding-left: 18px; color: #334155; font-size: 12px; line-height: 1.55; }
 .hero-badges { display: flex; gap: 10px; align-items: flex-start; flex-wrap: wrap; justify-content: flex-end; }
 .workflow-panel { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
 .button-link { display: inline-flex; align-items: center; border-radius: 10px; background: #0f766e; color: #ffffff; padding: 10px 14px; font-weight: 900; }
@@ -146,6 +175,9 @@ td.money, th.money { text-align: right; font-variant-numeric: tabular-nums; }
   .workflow-panel { display: grid; }
   .hero-badges { justify-content: flex-start; }
   table { min-width: 860px; }
+  .pillar-grid, .roadmap-grid, .workforce-grid { grid-template-columns: 1fr; }
+  .alignment-budget { grid-template-columns: 1fr; }
+  .alignment-budget div { padding: 0; border: 0; }
 }
 @media (max-width: 640px) {
   .container { padding: 12px; }

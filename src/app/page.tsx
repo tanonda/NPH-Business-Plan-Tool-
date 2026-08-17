@@ -17,6 +17,7 @@ import { PlanComparisonPanel } from '@/components/PlanComparisonPanel';
 import { AccountingDashboardPanel } from '@/components/AccountingDashboardPanel';
 import { BudgetControlPanel } from '@/components/BudgetControlPanel';
 import { ThemeToggle } from '@/components/ThemeToggle';
+import { EmergencyCareAlignmentPanel } from '@/components/EmergencyCareAlignmentPanel';
 import { canManageBudgetCeilings } from '@/lib/access-policy';
 
 type Status = 'DRAFT' | 'REVIEW' | 'RETURNED' | 'BUDGET_REVIEW' | 'FINANCE_REVIEW' | 'BUDGET_CLEARED' | 'APPROVED' | 'SUBMITTED' | 'EXECUTION' | 'REJECTED' | 'LOCKED';
@@ -313,6 +314,49 @@ export default function HomePage() {
     setMessage('New draft ready.');
   }
 
+  function startEmergencyCare2026Plan() {
+    const transformationActivities: ActivityInput[] = [
+      ['ED-01', 'Governance & digital integration', 'Implement ED digital patient tracking, organogram and dedicated financial job-code setup.', 16692000],
+      ['ED-02', 'Clinical excellence & quality', 'Institutionalise monthly clinical audit, M&M reviews and ICU operational readiness.', 5000000],
+      ['ED-03', 'Nursing leadership & specialised care', 'Deliver acuity-based staffing, specialised pathways and workforce wellness activities.', 22965000],
+      ['ED-04', 'Allied health & emergency pharmacy', 'Integrate ED clinical pharmacy, laboratory optimisation and specialist emergency pathways.', 7820000],
+      ['ED-05', 'Infrastructure resilience & cybersecurity', 'Strengthen ED facility resilience, network security and operational safety systems.', 46563766],
+      ['ED-06', 'Biomedical engineering & assets', 'Establish asset registry, preventive maintenance and priority equipment replacement.', 341313200],
+      ['ED-07', 'Prehospital & regional response', 'Implement dispatch, retrieval, ALS capability and community first responder rollout.', 2305234]
+    ].map(([activityNumber, subProgram, activityDescription, estimatedCost], index) => ({
+      ...emptyActivity(index + 1),
+      activityNumber: String(activityNumber),
+      subProgram: String(subProgram),
+      activityDescription: String(activityDescription),
+      expenditureDescription: String(activityDescription),
+      corporatePlanKeyActivity: 'Emergency Care Services Clinical Transformation 2026–2028',
+      outputOrServiceTarget: 'Annual transformation milestone delivered and evidenced',
+      targetForYear: '2026 mobilisation and system-integration deliverables completed',
+      responsibility: 'Head of Emergency Department',
+      estimatedCost: Number(estimatedCost),
+      recurrentBudget: 0,
+      developmentPartners: Number(estimatedCost),
+      funding: 'Development partner request',
+      activityCategory: 'Strategic transformation',
+      nsdpTarget: 'SOC 3.1 / SOC 3.4',
+      budgetCategory: 'Development'
+    }));
+
+    setSelectedPlanId(null);
+    setStatus('DRAFT');
+    setTitle('VNH ED 2026 Clinical Transformation Business Plan');
+    setOrganization('Ministry of Health');
+    setYear(2026);
+    setFacility('Vanuatu National Hospital');
+    setCostCenterName('Emergency Department');
+    setCeilingAmount(6000000);
+    setCeilingJustification('The Emergency Care Services Clinical Transformation 2026–2028 proposal identifies a funding gap for staged implementation. Activities are presented for Finance and development-partner review.');
+    setActivities(transformationActivities);
+    setAuditLogs([]);
+    setMessage('ED 2026 transformation template loaded. Confirm costs, funding sources, job codes and ownership before saving.');
+    window.location.hash = 'plan-form';
+  }
+
   async function loadPlan(planId: string) {
     const res = await fetch(`/api/plans/${planId}`, { cache: 'no-store' });
     if (!res.ok) {
@@ -563,6 +607,7 @@ export default function HomePage() {
           </div>
           <nav className="side-nav" aria-label="Main navigation">
             <a href="#dashboard">Dashboard</a>
+            <a href="#ed-transformation">ED Transformation</a>
             <a href="#budget-control">Budget Control</a>
             <a href="#accounting-tracker">Accounting</a>
             <a href="#plan-workflow">Workflow</a>
@@ -589,6 +634,7 @@ export default function HomePage() {
         <div id="dashboard"></div>
         <DashboardSummaryPanel />
         <NotificationsPanel mode="summary" />
+        <EmergencyCareAlignmentPanel onStart2026Plan={startEmergencyCare2026Plan} canEditPlan={canEditPlan} />
         {canViewBudgetControl && <BudgetControlPanel selectedCostCenter={costCenter} year={year} />}
         {canViewAccounting && <AccountingDashboardPanel selectedCostCenter={costCenter} year={year} selectedPlanId={selectedPlanId} />}
 
