@@ -24,6 +24,7 @@ export function StrategyWorkforcePanel({ departments, year, canManage }: { depar
   const [appraisals, setAppraisals] = useState<Appraisal[]>([]);
   const [selectedPillar, setSelectedPillar] = useState<Pillar | null>(null);
   const [selectedJob, setSelectedJob] = useState<JobDescription | null>(null);
+  const [selectedAllocationId, setSelectedAllocationId] = useState('');
   const [selectedAppraisal, setSelectedAppraisal] = useState<any>(null);
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(true);
@@ -56,6 +57,20 @@ export function StrategyWorkforcePanel({ departments, year, canManage }: { depar
   async function openPillar(pillar: Pillar) { const response = await fetch(`/api/pillars/${pillar.id}`, { cache: 'no-store' }); if (response.ok) setSelectedPillar(await response.json()); }
   async function openJob(job: JobDescription) { const response = await fetch(`/api/job-descriptions/${job.id}`, { cache: 'no-store' }); if (response.ok) setSelectedJob(await response.json()); }
   async function openAppraisal(appraisal: Appraisal) { const response = await fetch(`/api/appraisals/${appraisal.id}`, { cache: 'no-store' }); if (response.ok) setSelectedAppraisal(await response.json()); }
+  async function reviewRecord(url: string, status: string, refresh: () => Promise<void>) {
+    try {
+      const response = await fetch(url, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || 'Could not update review status.');
+      setMessage(`Record moved to ${status}.`);
+      await refresh();
+    } catch (error) { setMessage(error instanceof Error ? error.message : 'Could not update review status.'); }
+  }
+  const reviewActions = (record: { id: string; status: string }, kind: 'pillars' | 'jobs' | 'allocations') => {
+    const endpoint = kind === 'pillars' ? `/api/pillars/${record.id}/status` : kind === 'jobs' ? `/api/job-descriptions/${record.id}/status` : `/api/pillar-allocations/${record.id}`;
+    const next = record.status === 'DRAFT' || record.status === 'INDICATIVE' ? 'REVIEW' : record.status === 'REVIEW' ? 'APPROVED' : record.status === 'REQUESTED' ? 'APPROVED' : record.status === 'RETURNED' ? (kind === 'allocations' ? 'REQUESTED' : 'REVIEW') : record.status === 'APPROVED' ? (kind === 'allocations' ? 'CLOSED' : 'ARCHIVED') : '';
+    return next ? <button type="button" className="secondary" onClick={(event) => { event.stopPropagation(); void reviewRecord(endpoint, next, load); }}>Move to {next}</button> : null;
+  };
 
   async function createPillar(event: FormEvent) { event.preventDefault(); try { await request('/api/pillars', { ...pillarForm, ownerDepartmentId: pillarForm.type === 'LOCAL' ? pillarForm.ownerDepartmentId : null, parentPillarId: pillarForm.parentPillarId || null }); setMessage('Strategic Pillar created.'); setShowPillarForm(false); setPillarForm({ code: '', title: '', objective: '', operationalGuidance: '', strategicAlignment: '', ownerDepartmentId: '', parentPillarId: '', type: 'LOCAL' }); await load(); } catch (error) { setMessage(error instanceof Error ? error.message : 'Could not create pillar.'); } }
   async function createAllocation(event: FormEvent) { event.preventDefault(); try { await request('/api/pillar-allocations', allocationForm); setMessage('Pillar Budget Allocation created.'); setAllocationForm({ pillarId: '', departmentId: '', fiscalYear: year, requestedAmount: 0, approvedAmount: 0, indicativeAmount: 0, status: 'REQUESTED', notes: '' }); await load(); } catch (error) { setMessage(error instanceof Error ? error.message : 'Could not save allocation.'); } }
@@ -68,6 +83,9 @@ export function StrategyWorkforcePanel({ departments, year, canManage }: { depar
     <div className="panel-title-row"><div><p className="eyebrow">Governance workspace</p><h2>Strategy, workforce & appraisal register</h2><p className="muted">Manage approved master/local pillars, their departmental funding, role definitions and appraisal records.</p></div><button className="secondary" type="button" onClick={() => void load()}>{loading ? 'Loading…' : 'Refresh'}</button></div>
     <div className="workspace-tabs" role="tablist"><button type="button" className={tab === 'pillars' ? '' : 'secondary'} onClick={() => setTab('pillars')}>Strategic Pillars</button><button type="button" className={tab === 'jobs' ? '' : 'secondary'} onClick={() => setTab('jobs')}>Job Descriptions</button><button type="button" className={tab === 'people' ? '' : 'secondary'} onClick={() => setTab('people')}>Positions & Appraisals</button></div>
     {message && <p className="notice" role="status">{message}</p>}
+    {selectedPillar && <div className="actions review-actions"><span>Review pillar: <strong>{selectedPillar.status}</strong></span>{reviewActions(selectedPillar, 'pillars')}</div>}
+    {selectedJob && <div className="actions review-actions"><span>Review JD: <strong>{selectedJob.status}</strong></span>{reviewActions(selectedJob, 'jobs')}</div>}
+    {allocations.length > 0 && <div className="actions review-actions"><label>Review allocation<select value={selectedAllocationId} onChange={(event) => setSelectedAllocationId(event.target.value)}><option value="">Select allocation</option>{allocations.map((allocation) => <option key={allocation.id} value={allocation.id}>{allocation.pillar?.title || allocation.pillarId} / {allocation.department?.name || allocation.departmentId} / {allocation.status}</option>)}</select></label>{selectedAllocationId && reviewActions(allocations.find((allocation) => allocation.id === selectedAllocationId) as Allocation, 'allocations')}</div>}
 
     {tab === 'pillars' && <div className="workspace-content">
       <div className="actions"><button type="button" onClick={() => setShowPillarForm((value) => !value)} disabled={!canManage}>{showPillarForm ? 'Close form' : 'Create pillar'}</button><button type="button" className="secondary" onClick={() => document.getElementById('allocation-form')?.scrollIntoView({ behavior: 'smooth' })} disabled={!canManage}>Add pillar allocation</button></div>

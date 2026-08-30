@@ -139,6 +139,7 @@ model User {
   exportHistory        ExportHistory[]
   staffProfile         StaffMember?
   assignedAppraisals   PerformanceAppraisal[] @relation("AppraisalReviewer")
+  governanceReviews    GovernanceReview[]
 
   @@index([role])
   @@index([isActive])
@@ -378,6 +379,22 @@ model ActivityPillarFundingSplit {
   @@index([pillarBudgetAllocationId])
 }
 
+model GovernanceReview {
+  id            String   @id @default(cuid())
+  entityType    String
+  entityId      String
+  previousStatus String
+  newStatus     String
+  comment       String   @default("")
+  snapshot      Json
+  reviewedById  String
+  reviewedBy    User     @relation(fields: [reviewedById], references: [id], onDelete: Restrict)
+  createdAt     DateTime @default(now())
+
+  @@index([entityType, entityId, createdAt])
+  @@index([reviewedById])
+}
+
 model JobDescription {
   id          String            @id @default(cuid())
   departmentId String?
@@ -400,9 +417,35 @@ model JobDescription {
 
   objectives  JobDescriptionObjective[]
   assignments PositionAssignment[]
+  versions    JobDescriptionVersion[]
 
   @@unique([departmentId, code, version])
   @@index([departmentId, status])
+}
+
+model JobDescriptionVersion {
+  id          String   @id @default(cuid())
+  jobDescriptionId String
+  jobDescription JobDescription @relation(fields: [jobDescriptionId], references: [id], onDelete: Cascade)
+  version     Int
+  departmentId String?
+  code        String
+  title       String
+  purpose     String @default("")
+  reportsTo   String @default("")
+  supervises  String @default("")
+  contacts    String @default("")
+  specialConditions String @default("")
+  selectionCriteria String @default("")
+  sourceReference String @default("")
+  status      RecordStatus
+  effectiveFrom DateTime?
+  effectiveTo DateTime?
+  objectives  Json
+  createdAt   DateTime @default(now())
+
+  @@unique([jobDescriptionId, version])
+  @@index([code, version])
 }
 
 model JobDescriptionObjective {

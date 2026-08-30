@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { requireApiRole, requireApiUser } from '@/lib/api-auth-guard';
 import { StrategicPillarSchema } from '@/lib/schemas';
-import { getUserDepartmentIds, userHasGlobalDepartmentAccess } from '@/lib/department-access';
+import { getUserDepartmentIds, userHasGlobalDepartmentAccess, userCanAccessDepartment } from '@/lib/department-access';
 
 export const dynamic = 'force-dynamic';
 
@@ -12,6 +12,7 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const requestedDepartmentId = searchParams.get('departmentId') || undefined;
   const accessibleDepartmentIds = userHasGlobalDepartmentAccess(auth.user) ? null : await getUserDepartmentIds(auth.user.id);
+  if (requestedDepartmentId && accessibleDepartmentIds && !accessibleDepartmentIds.includes(requestedDepartmentId)) return NextResponse.json({ error: 'You do not have access to this department.' }, { status: 403 });
   const departmentIds = requestedDepartmentId ? [requestedDepartmentId] : accessibleDepartmentIds;
   const where = departmentIds ? { OR: [{ type: 'MASTER' as const }, { ownerDepartmentId: { in: departmentIds } }, { allocations: { some: { departmentId: { in: departmentIds } } } }] } : {};
   const pillars = await prisma.strategicPillar.findMany({
@@ -33,6 +34,10 @@ export async function POST(request: NextRequest) {
       const departmentIds = await getUserDepartmentIds(auth.user.id);
       if (!departmentIds.includes(data.ownerDepartmentId)) return NextResponse.json({ error: 'You do not have access to create a pillar for this department.' }, { status: 403 });
     }
+  }
+  if (data.parentPillarId) {
+    const parent = await prisma.strategicPillar.findUnique({ where: { id: data.parentPillarId }, select: { type: true } });
+    if (!parent || parent.type !== 'MASTER') return NextResponse.json({ error: 'A local pillar can only link to a Master Pillar.' }, { status: 400 });
   }
   const pillar = await prisma.strategicPillar.create({ data, include: { ownerDepartment: true, parentPillar: true } });
   return NextResponse.json(pillar, { status: 201 });
