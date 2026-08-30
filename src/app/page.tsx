@@ -18,6 +18,7 @@ import { AccountingDashboardPanel } from '@/components/AccountingDashboardPanel'
 import { BudgetControlPanel } from '@/components/BudgetControlPanel';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { EmergencyCareAlignmentPanel } from '@/components/EmergencyCareAlignmentPanel';
+import { StrategyWorkforcePanel } from '@/components/StrategyWorkforcePanel';
 import { canManageBudgetCeilings } from '@/lib/access-policy';
 
 type Status = 'DRAFT' | 'REVIEW' | 'RETURNED' | 'BUDGET_REVIEW' | 'FINANCE_REVIEW' | 'BUDGET_CLEARED' | 'APPROVED' | 'SUBMITTED' | 'EXECUTION' | 'REJECTED' | 'LOCKED';
@@ -46,6 +47,7 @@ type ActivityInput = {
   nsdpTarget: string;
   activityCategory: string;
   fundingSourceId?: string | null;
+  pillarFundingSplits: { pillarBudgetAllocationId: string; amount: number }[];
   approvedBudget: number;
   sortOrder: number;
 };
@@ -53,6 +55,7 @@ type ActivityInput = {
 type Department = { id: string; code: string; name: string; costCenter?: string | null; costCenterName?: string | null };
 type ReferenceItem = { code?: string; label?: string; description?: string; display?: string; category?: string; name?: string; jobCode?: string; costCenterCode?: string; costCenterName?: string };
 type ReferenceData = { fundingSources: ReferenceItem[]; budgetCategories: ReferenceItem[]; accountCodes: ReferenceItem[]; activityCategories: ReferenceItem[]; nsdpTargets: ReferenceItem[]; departments: ReferenceItem[]; jobCodes: ReferenceItem[]; costCenters: ReferenceItem[] };
+type PillarAllocationOption = { id: string; pillar: { code: string; title: string }; department: { id: string; name: string }; fiscalYear: number; status: string; availableAmount: number };
 
 type Plan = {
   id: string;
@@ -103,6 +106,7 @@ const emptyActivity = (sortOrder: number): ActivityInput => ({
   nsdpTarget: '',
   activityCategory: '',
   fundingSourceId: null,
+  pillarFundingSplits: [],
   approvedBudget: 0,
   sortOrder
 });
@@ -132,6 +136,7 @@ function normalizeActivity(activity: any, index: number): ActivityInput {
     nsdpTarget: activity.nsdpTarget || '',
     activityCategory: activity.activityCategory || '',
     fundingSourceId: activity.fundingSourceId || null,
+    pillarFundingSplits: Array.isArray(activity.pillarFundingSplits) ? activity.pillarFundingSplits.map((split: any) => ({ pillarBudgetAllocationId: String(split.pillarBudgetAllocationId), amount: Number(split.amount || 0) })) : [],
     approvedBudget: Number(activity.approvedBudget || activity.recurrentBudget || activity.estimatedCost || 0),
     sortOrder: Number(activity.sortOrder || index + 1)
   };
@@ -142,6 +147,7 @@ export default function HomePage() {
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [referenceData, setReferenceData] = useState<ReferenceData>({ fundingSources: [], budgetCategories: [], accountCodes: [], activityCategories: [], nsdpTargets: [], departments: [], jobCodes: [], costCenters: [] });
+  const [pillarAllocations, setPillarAllocations] = useState<PillarAllocationOption[]>([]);
   const [comparisonRefreshKey, setComparisonRefreshKey] = useState(0);
   const [loading, setLoading] = useState(true);
   const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
@@ -240,6 +246,13 @@ export default function HomePage() {
     setReferenceData({ fundingSources, budgetCategories, accountCodes, activityCategories, nsdpTargets, departments: refDepartments, jobCodes, costCenters });
   }
 
+  async function loadPillarAllocations() {
+    const query = new URLSearchParams({ year: String(year) });
+    if (departmentId) query.set('departmentId', departmentId);
+    const res = await fetch(`/api/pillar-allocations?${query.toString()}`, { cache: 'no-store' });
+    if (res.ok) setPillarAllocations(await res.json());
+  }
+
   async function createReferenceItem(list: string, defaults: Partial<ReferenceItem> = {}, afterCreate?: (item: ReferenceItem) => void) {
     const code = prompt(`Enter code for new ${list.replace('-', ' ')}`, defaults.code || '');
     if (code === null) return;
@@ -275,6 +288,7 @@ export default function HomePage() {
   }
 
   useEffect(() => { refresh(); void loadReferenceData(); }, []);
+  useEffect(() => { void loadPillarAllocations(); }, [departmentId, year]);
 
   const summary = useMemo(() => summarizePlan(activities), [activities]);
   const ceilingVariance = summary.totalEstimatedCost - Number(ceilingAmount || 0);
@@ -287,6 +301,18 @@ export default function HomePage() {
 
   function updateActivity(index: number, patch: Partial<ActivityInput>) {
     setActivities((current) => current.map((activity, i) => i === index ? { ...activity, ...patch } : activity));
+  }
+
+  function updatePillarFundingSplit(activityIndex: number, splitIndex: number, patch: Partial<ActivityInput['pillarFundingSplits'][number]>) {
+    setActivities((current) => current.map((activity, index) => index !== activityIndex ? activity : { ...activity, pillarFundingSplits: activity.pillarFundingSplits.map((split, itemIndex) => itemIndex === splitIndex ? { ...split, ...patch } : split) }));
+  }
+
+  function addPillarFundingSplit(activityIndex: number) {
+    setActivities((current) => current.map((activity, index) => index !== activityIndex ? activity : { ...activity, pillarFundingSplits: [...activity.pillarFundingSplits, { pillarBudgetAllocationId: '', amount: 0 }] }));
+  }
+
+  function removePillarFundingSplit(activityIndex: number, splitIndex: number) {
+    setActivities((current) => current.map((activity, index) => index !== activityIndex ? activity : { ...activity, pillarFundingSplits: activity.pillarFundingSplits.filter((_, itemIndex) => itemIndex !== splitIndex) }));
   }
 
   function addActivity() {
@@ -608,6 +634,7 @@ export default function HomePage() {
           <nav className="side-nav" aria-label="Main navigation">
             <a href="#dashboard">Dashboard</a>
             <a href="#ed-transformation">ED Transformation</a>
+            <a href="#strategy-workforce">Strategy & Workforce</a>
             <a href="#budget-control">Budget Control</a>
             <a href="#accounting-tracker">Accounting</a>
             <a href="#plan-workflow">Workflow</a>
@@ -635,6 +662,7 @@ export default function HomePage() {
         <DashboardSummaryPanel />
         <NotificationsPanel mode="summary" />
         <EmergencyCareAlignmentPanel onStart2026Plan={startEmergencyCare2026Plan} canEditPlan={canEditPlan} />
+        <StrategyWorkforcePanel departments={departments} year={year} canManage={['ADMIN', 'PLANNER', 'APPROVER', 'REVIEWER', 'FINANCE', 'BUDGET_OFFICER'].includes(role)} />
         {canViewBudgetControl && <BudgetControlPanel selectedCostCenter={costCenter} year={year} />}
         {canViewAccounting && <AccountingDashboardPanel selectedCostCenter={costCenter} year={year} selectedPlanId={selectedPlanId} />}
 
@@ -775,6 +803,23 @@ export default function HomePage() {
                     <label>Output/service target<textarea value={activity.outputOrServiceTarget} onChange={(e) => updateActivity(index, { outputOrServiceTarget: e.target.value })} /></label>
                     <label>Target for year<textarea value={activity.targetForYear} onChange={(e) => updateActivity(index, { targetForYear: e.target.value })} /></label>
                     <label>Estimated cost<input type="number" value={activity.estimatedCost} onChange={(e) => updateActivity(index, { estimatedCost: Number(e.target.value), recurrentBudget: Number(e.target.value) })} /></label>
+                    <div className="pillar-split-editor">
+                      <span className="field-label">Pillar Budget Allocation{activity.pillarFundingSplits.length > 1 ? ' splits' : ''}</span>
+                      {activity.pillarFundingSplits.length === 0 && <p className="muted">Optional. Link this activity to one or more approved/requested department pillar allocations.</p>}
+                      {activity.pillarFundingSplits.map((split, splitIndex) => {
+                        const splitTotal = activity.pillarFundingSplits.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+                        return <div className="pillar-split-row" key={`${split.pillarBudgetAllocationId}-${splitIndex}`}>
+                          <select value={split.pillarBudgetAllocationId} onChange={(event) => updatePillarFundingSplit(index, splitIndex, { pillarBudgetAllocationId: event.target.value })}>
+                            <option value="">Select pillar allocation</option>
+                            {pillarAllocations.map((allocation) => <option key={allocation.id} value={allocation.id}>{allocation.pillar.code} — {allocation.pillar.title} · {formatVatu(Number(allocation.availableAmount || 0))} available</option>)}
+                          </select>
+                          <input type="number" min="0" value={split.amount} onChange={(event) => updatePillarFundingSplit(index, splitIndex, { amount: Number(event.target.value) })} aria-label="Pillar allocation amount" />
+                          <button className="secondary" type="button" onClick={() => removePillarFundingSplit(index, splitIndex)}>Remove</button>
+                          {splitIndex === activity.pillarFundingSplits.length - 1 && <small className={Math.abs(splitTotal - activity.estimatedCost) < 0.01 ? 'split-valid' : 'split-invalid'}>{formatVatu(splitTotal)} allocated of {formatVatu(activity.estimatedCost)}</small>}
+                        </div>;
+                      })}
+                      {canEditPlan && <button className="secondary mini-button" type="button" onClick={() => addPillarFundingSplit(index)}>Add pillar allocation</button>}
+                    </div>
                     <label>Recurrent budget<input type="number" value={activity.recurrentBudget} onChange={(e) => updateActivity(index, { recurrentBudget: Number(e.target.value) })} /></label>
                     <label>Development partners<input type="number" value={activity.developmentPartners} onChange={(e) => updateActivity(index, { developmentPartners: Number(e.target.value) })} /></label>
                     <label>Budget category<select value={activity.budgetCategory} onChange={(e) => updateActivity(index, { budgetCategory: e.target.value })}><option value="">Select budget category</option>{referenceData.budgetCategories.map((item) => (<option key={optionLabel(item)} value={optionLabel(item)}>{optionLabel(item)}</option>))}</select></label>

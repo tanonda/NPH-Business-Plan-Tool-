@@ -55,6 +55,36 @@ enum DepartmentAccessLevel {
   VIEWER
 }
 
+enum PillarType {
+  MASTER
+  LOCAL
+}
+
+enum RecordStatus {
+  DRAFT
+  REVIEW
+  APPROVED
+  RETURNED
+  ARCHIVED
+}
+
+enum PillarAllocationStatus {
+  INDICATIVE
+  REQUESTED
+  APPROVED
+  RETURNED
+  CLOSED
+}
+
+enum AppraisalStatus {
+  DRAFT
+  IN_PROGRESS
+  SELF_REVIEW
+  MANAGER_REVIEW
+  COMPLETED
+  CANCELLED
+}
+
 enum AuditAction {
   PLAN_CREATED
   PLAN_UPDATED
@@ -107,6 +137,8 @@ model User {
   versionSnapshots     VersionSnapshot[]
   notifications        Notification[]
   exportHistory        ExportHistory[]
+  staffProfile         StaffMember?
+  assignedAppraisals   PerformanceAppraisal[] @relation("AppraisalReviewer")
 
   @@index([role])
   @@index([isActive])
@@ -140,6 +172,11 @@ model Department {
 
   plans          BusinessPlan[]
   userAccess     UserDepartmentAccess[]
+  ownedPillars   StrategicPillar[] @relation("PillarOwnerDepartment")
+  pillarAllocations PillarBudgetAllocation[]
+  staffMembers   StaffMember[]
+  jobDescriptions JobDescription[]
+  positionAssignments PositionAssignment[]
 
   @@index([code])
   @@index([isActive])
@@ -243,6 +280,7 @@ model Activity {
 
   commitments              Commitment[]
   expenditures             Expenditure[]
+  pillarFundingSplits      ActivityPillarFundingSplit[]
 
   createdAt                DateTime     @default(now())
   updatedAt                DateTime     @updatedAt
@@ -251,6 +289,212 @@ model Activity {
   @@index([activityNumber])
   @@index([subProgram])
   @@index([sortOrder])
+}
+
+model StrategicPlan {
+  id          String            @id @default(cuid())
+  title       String
+  description String            @default("")
+  startYear   Int
+  endYear     Int
+  status      RecordStatus      @default(DRAFT)
+  sourceReference String        @default("")
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  pillars     StrategicPillar[]
+
+  @@index([status])
+  @@index([startYear, endYear])
+}
+
+model StrategicPillar {
+  id          String            @id @default(cuid())
+  strategicPlanId String?
+  strategicPlan StrategicPlan?  @relation(fields: [strategicPlanId], references: [id], onDelete: SetNull)
+  parentPillarId String?
+  parentPillar StrategicPillar? @relation("PillarHierarchy", fields: [parentPillarId], references: [id], onDelete: SetNull)
+  childPillars StrategicPillar[] @relation("PillarHierarchy")
+  ownerDepartmentId String?
+  ownerDepartment Department?   @relation("PillarOwnerDepartment", fields: [ownerDepartmentId], references: [id], onDelete: SetNull)
+  code        String
+  title       String
+  objective   String            @default("")
+  operationalGuidance String    @default("")
+  strategicAlignment String     @default("")
+  milestones  Json?
+  risks       String            @default("")
+  partnerGuidance String        @default("")
+  sourceReference String        @default("")
+  type        PillarType        @default(LOCAL)
+  status      RecordStatus      @default(DRAFT)
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  allocations PillarBudgetAllocation[]
+
+  @@unique([strategicPlanId, code])
+  @@index([type, status])
+  @@index([ownerDepartmentId])
+  @@index([parentPillarId])
+}
+
+model PillarBudgetAllocation {
+  id          String            @id @default(cuid())
+  pillarId    String
+  pillar      StrategicPillar   @relation(fields: [pillarId], references: [id], onDelete: Cascade)
+  departmentId String
+  department  Department        @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  fiscalYear  Int
+  costCenterCode String          @default("")
+  fundingSourceId String?
+  fundingSource FundingSource?  @relation(fields: [fundingSourceId], references: [id], onDelete: SetNull)
+  indicativeAmount Decimal      @default(0) @db.Decimal(18, 2)
+  requestedAmount  Decimal      @default(0) @db.Decimal(18, 2)
+  approvedAmount   Decimal      @default(0) @db.Decimal(18, 2)
+  status       PillarAllocationStatus @default(INDICATIVE)
+  notes        String            @default("")
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+
+  fundingSplits ActivityPillarFundingSplit[]
+
+  @@index([departmentId, fiscalYear])
+  @@index([pillarId, fiscalYear])
+  @@index([status])
+}
+
+model ActivityPillarFundingSplit {
+  id          String            @id @default(cuid())
+  activityId  String
+  activity    Activity          @relation(fields: [activityId], references: [id], onDelete: Cascade)
+  pillarBudgetAllocationId String
+  pillarBudgetAllocation PillarBudgetAllocation @relation(fields: [pillarBudgetAllocationId], references: [id], onDelete: Restrict)
+  amount      Decimal           @default(0) @db.Decimal(18, 2)
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  @@unique([activityId, pillarBudgetAllocationId])
+  @@index([pillarBudgetAllocationId])
+}
+
+model JobDescription {
+  id          String            @id @default(cuid())
+  departmentId String?
+  department  Department?       @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  code        String
+  title       String
+  version     Int               @default(1)
+  purpose     String            @default("")
+  reportsTo   String            @default("")
+  supervises  String            @default("")
+  contacts    String            @default("")
+  specialConditions String      @default("")
+  selectionCriteria String      @default("")
+  sourceReference String        @default("")
+  status      RecordStatus      @default(DRAFT)
+  effectiveFrom DateTime?
+  effectiveTo DateTime?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  objectives  JobDescriptionObjective[]
+  assignments PositionAssignment[]
+
+  @@unique([departmentId, code, version])
+  @@index([departmentId, status])
+}
+
+model JobDescriptionObjective {
+  id          String            @id @default(cuid())
+  jobDescriptionId String
+  jobDescription JobDescription @relation(fields: [jobDescriptionId], references: [id], onDelete: Cascade)
+  kra         String
+  kta         String
+  kpi         String
+  targetDate  String            @default("")
+  sortOrder   Int               @default(0)
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  @@index([jobDescriptionId, sortOrder])
+}
+
+model StaffMember {
+  id          String            @id @default(cuid())
+  userId      String?           @unique
+  user        User?             @relation(fields: [userId], references: [id], onDelete: SetNull)
+  departmentId String?
+  department  Department?       @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  staffNumber String            @default("")
+  fullName    String
+  email       String            @default("")
+  isActive    Boolean           @default(true)
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  assignments PositionAssignment[]
+
+  @@index([departmentId, isActive])
+}
+
+model PositionAssignment {
+  id          String            @id @default(cuid())
+  staffMemberId String
+  staffMember StaffMember       @relation(fields: [staffMemberId], references: [id], onDelete: Cascade)
+  jobDescriptionId String
+  jobDescription JobDescription @relation(fields: [jobDescriptionId], references: [id], onDelete: Restrict)
+  departmentId String?
+  department  Department?       @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  supervisorName String         @default("")
+  startsOn    DateTime
+  endsOn      DateTime?
+  isActive    Boolean           @default(true)
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  appraisals  PerformanceAppraisal[]
+
+  @@index([staffMemberId, isActive])
+  @@index([departmentId, isActive])
+}
+
+model PerformanceAppraisal {
+  id          String            @id @default(cuid())
+  positionAssignmentId String
+  positionAssignment PositionAssignment @relation(fields: [positionAssignmentId], references: [id], onDelete: Restrict)
+  reviewerId  String?
+  reviewer    User?             @relation("AppraisalReviewer", fields: [reviewerId], references: [id], onDelete: SetNull)
+  periodStart DateTime
+  periodEnd   DateTime
+  status      AppraisalStatus   @default(DRAFT)
+  developmentPlan String        @default("")
+  overallComment String         @default("")
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  objectives  AppraisalObjective[]
+
+  @@index([positionAssignmentId, status])
+  @@index([reviewerId])
+}
+
+model AppraisalObjective {
+  id          String            @id @default(cuid())
+  appraisalId String
+  appraisal   PerformanceAppraisal @relation(fields: [appraisalId], references: [id], onDelete: Cascade)
+  kra         String
+  kta         String
+  kpi         String
+  targetDate  String            @default("")
+  evidence    String            @default("")
+  rating      Int?
+  reviewerComment String        @default("")
+  sortOrder   Int               @default(0)
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  @@index([appraisalId, sortOrder])
 }
 
 model AuditLog {
@@ -419,6 +663,7 @@ model FundingSource {
 
   allocations         BudgetAllocation[]
   donorFundAllocations DonorFundAllocation[]
+  pillarAllocations   PillarBudgetAllocation[]
 
   @@index([type])
   @@index([confirmationStatus])

@@ -152,6 +152,27 @@ td.money, th.money { text-align: right; font-variant-numeric: tabular-nums; }
 .workforce-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
 .workforce-card { padding: 14px; border: 1px solid #cbd5e1; border-radius: 14px; background: #fff; }
 .workforce-card ul { margin: 11px 0 0; padding-left: 18px; color: #334155; font-size: 12px; line-height: 1.55; }
+.strategy-workforce-panel { margin: 18px 0; }
+.workspace-tabs { display: flex; gap: 8px; flex-wrap: wrap; margin: 18px 0; padding-bottom: 14px; border-bottom: 1px solid var(--line); }
+.workspace-tabs button { box-shadow: none; }
+.workspace-content { display: grid; gap: 16px; }
+.clickable-row { cursor: pointer; }
+.clickable-row:hover td { background: #ecfdf5; }
+.record-detail { border: 1px solid #99d7cc; border-radius: 15px; background: #f0fdfa; overflow: hidden; }
+.record-detail summary { padding: 14px; cursor: pointer; color: #134e4a; font-weight: 900; }
+.detail-body { padding: 0 14px 14px; }
+.detail-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 0 0 14px; }
+.detail-grid p { display: grid; gap: 4px; margin: 0; padding: 11px; border-radius: 10px; background: #fff; color: #475569; font-size: 13px; line-height: 1.5; white-space: pre-wrap; }
+.detail-grid strong { color: #0f2a44; }
+.objective-form-row { display: grid; grid-template-columns: 1fr 1.3fr 1.5fr auto; gap: 8px; margin: 8px 0; }
+.two-up { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.pillar-split-editor { grid-column: span 2; display: grid; gap: 7px; padding: 10px; border: 1px solid #bae6d8; border-radius: 12px; background: #f0fdfa; }
+.field-label { color: #134e4a; font-size: 13px; font-weight: 850; }
+.pillar-split-editor .muted { margin: 0; font-size: 12px; }
+.pillar-split-row { display: grid; grid-template-columns: minmax(220px, 1fr) 130px auto; gap: 8px; align-items: center; }
+.pillar-split-row small { grid-column: 1 / -1; font-size: 12px; font-weight: 800; }
+.split-valid { color: #15803d; }
+.split-invalid { color: #b45309; }
 .hero-badges { display: flex; gap: 10px; align-items: flex-start; flex-wrap: wrap; justify-content: flex-end; }
 .workflow-panel { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
 .button-link { display: inline-flex; align-items: center; border-radius: 10px; background: #0f766e; color: #ffffff; padding: 10px 14px; font-weight: 900; }
@@ -176,6 +197,9 @@ td.money, th.money { text-align: right; font-variant-numeric: tabular-nums; }
   .hero-badges { justify-content: flex-start; }
   table { min-width: 860px; }
   .pillar-grid, .roadmap-grid, .workforce-grid { grid-template-columns: 1fr; }
+  .detail-grid, .two-up, .objective-form-row { grid-template-columns: 1fr; }
+  .pillar-split-editor { grid-column: span 1; }
+  .pillar-split-row { grid-template-columns: 1fr; }
   .alignment-budget { grid-template-columns: 1fr; }
   .alignment-budget div { padding: 0; border: 0; }
 }

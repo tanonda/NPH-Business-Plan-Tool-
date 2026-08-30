@@ -5,6 +5,7 @@ import { PlanSchema } from '@/lib/schemas';
 import { writeAuditLog } from '@/lib/auth';
 import { requireApiUser, requireApiRole } from '@/lib/api-auth-guard';
 import { resolvePlanCeilingForSave } from '@/lib/budget-ceiling';
+import { validatePillarFundingSplits } from '@/lib/pillar-budget';
 
 function withSummary(plan: any) {
   return {
@@ -27,7 +28,7 @@ export async function GET() {
   const departmentWhere = await getDepartmentScopedPlanWhere(auth.user);
 const plans = await prisma.businessPlan.findMany({
     where: departmentWhere,
-    include: { activities: { orderBy: { sortOrder: 'asc' } } },
+    include: { activities: { orderBy: { sortOrder: 'asc' }, include: { pillarFundingSplits: true } } },
     orderBy: { updatedAt: 'desc' }
   });
 
@@ -49,6 +50,12 @@ export async function POST(request: Request) {
     fiscalYear: parsed.year
   });
 
+  try {
+    await validatePillarFundingSplits(prisma, { fiscalYear: parsed.year, departmentId: departmentAccess.departmentId, activities: parsed.activities });
+  } catch (error) {
+    return Response.json({ error: error instanceof Error ? error.message : 'Invalid Pillar Budget Allocation split.' }, { status: 400 });
+  }
+
   const plan = await prisma.businessPlan.create({
     data: {
       title: parsed.title,
@@ -64,10 +71,14 @@ export async function POST(request: Request) {
       createdById: auth.user.id,
       updatedById: auth.user.id,
       activities: {
-        create: parsed.activities.map((a, index) => ({ ...a, sortOrder: a.sortOrder || index + 1 }))
+        create: parsed.activities.map(({ pillarFundingSplits, ...activity }, index) => ({
+          ...activity,
+          sortOrder: activity.sortOrder || index + 1,
+          pillarFundingSplits: pillarFundingSplits.length ? { create: pillarFundingSplits } : undefined
+        }))
       }
     },
-    include: { activities: { orderBy: { sortOrder: 'asc' } } }
+    include: { activities: { orderBy: { sortOrder: 'asc' }, include: { pillarFundingSplits: true } } }
   });
 
   await writeAuditLog({ businessPlanId: plan.id, action: 'PLAN_CREATED', details: `Created ${plan.title}` });

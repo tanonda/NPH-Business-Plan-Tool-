@@ -1,5 +1,10 @@
 import { z } from 'zod';
 
+export const ActivityPillarFundingSplitSchema = z.object({
+  pillarBudgetAllocationId: z.string().trim().min(1),
+  amount: z.coerce.number().positive()
+});
+
 export const ActivitySchema = z.object({
   subProgram: z.string().default(''),
   corporatePlanKeyActivity: z.string().default(''),
@@ -24,6 +29,7 @@ export const ActivitySchema = z.object({
   nsdpTarget: z.string().default(''),
   activityCategory: z.string().default(''),
   fundingSourceId: z.string().trim().optional().nullable(),
+  pillarFundingSplits: z.array(ActivityPillarFundingSplitSchema).default([]),
   approvedBudget: z.coerce.number().nonnegative().default(0),
   sortOrder: z.coerce.number().default(0)
 });
@@ -79,4 +85,73 @@ export const DepartmentBudgetCeilingSchema = z.object({
   restrictedFunds: z.coerce.number().nonnegative().default(0),
   withdrawnFunds: z.coerce.number().nonnegative().default(0),
   notes: z.string().optional().default('')
+});
+
+export const StrategicPillarSchema = z.object({
+  strategicPlanId: z.string().trim().optional().nullable(),
+  parentPillarId: z.string().trim().optional().nullable(),
+  ownerDepartmentId: z.string().trim().optional().nullable(),
+  code: z.string().trim().min(1),
+  title: z.string().trim().min(1),
+  objective: z.string().trim().default(''),
+  operationalGuidance: z.string().trim().default(''),
+  strategicAlignment: z.string().trim().default(''),
+  risks: z.string().trim().default(''),
+  partnerGuidance: z.string().trim().default(''),
+  sourceReference: z.string().trim().default(''),
+  type: z.enum(['MASTER', 'LOCAL']).default('LOCAL'),
+  status: z.enum(['DRAFT', 'REVIEW', 'APPROVED', 'RETURNED', 'ARCHIVED']).default('DRAFT')
+});
+
+export const PillarBudgetAllocationSchema = z.object({
+  pillarId: z.string().trim().min(1),
+  departmentId: z.string().trim().min(1),
+  fiscalYear: z.coerce.number().int(),
+  costCenterCode: z.string().trim().default(''),
+  fundingSourceId: z.string().trim().optional().nullable(),
+  indicativeAmount: z.coerce.number().nonnegative().default(0),
+  requestedAmount: z.coerce.number().nonnegative().default(0),
+  approvedAmount: z.coerce.number().nonnegative().default(0),
+  status: z.enum(['INDICATIVE', 'REQUESTED', 'APPROVED', 'RETURNED', 'CLOSED']).default('INDICATIVE'),
+  notes: z.string().trim().default('')
+});
+
+export const JobDescriptionSchema = z.object({
+  departmentId: z.string().trim().optional().nullable(),
+  code: z.string().trim().min(1),
+  title: z.string().trim().min(1),
+  version: z.coerce.number().int().positive().default(1),
+  purpose: z.string().trim().default(''),
+  reportsTo: z.string().trim().default(''),
+  supervises: z.string().trim().default(''),
+  contacts: z.string().trim().default(''),
+  specialConditions: z.string().trim().default(''),
+  selectionCriteria: z.string().trim().default(''),
+  sourceReference: z.string().trim().default(''),
+  status: z.enum(['DRAFT', 'REVIEW', 'APPROVED', 'RETURNED', 'ARCHIVED']).default('DRAFT'),
+  objectives: z.array(z.object({ kra: z.string().trim().min(1), kta: z.string().trim().min(1), kpi: z.string().trim().min(1), targetDate: z.string().trim().default('') })).default([])
+});
+
+export const StaffMemberSchema = z.object({
+  departmentId: z.string().trim().optional().nullable(),
+  staffNumber: z.string().trim().default(''),
+  fullName: z.string().trim().min(1),
+  email: z.string().trim().email().or(z.literal('')).default('')
+});
+
+export const PositionAssignmentSchema = z.object({
+  staffMemberId: z.string().trim().min(1),
+  jobDescriptionId: z.string().trim().min(1),
+  departmentId: z.string().trim().optional().nullable(),
+  supervisorName: z.string().trim().default(''),
+  startsOn: z.coerce.date(),
+  endsOn: z.coerce.date().optional().nullable()
+});
+
+export const PerformanceAppraisalSchema = z.object({
+  positionAssignmentId: z.string().trim().min(1),
+  periodStart: z.coerce.date(),
+  periodEnd: z.coerce.date(),
+  developmentPlan: z.string().trim().default(''),
+  overallComment: z.string().trim().default('')
 });

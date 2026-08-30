@@ -7,6 +7,7 @@ import { writeAuditLog } from '@/lib/auth';
 import { summarizePlan, toNumber } from '@/lib/business-plan-engine';
 import { requireApiUser, requireApiRole } from '@/lib/api-auth-guard';
 import { resolvePlanCeilingForSave } from '@/lib/budget-ceiling';
+import { validatePillarFundingSplits } from '@/lib/pillar-budget';
 
 function withSummary(plan: any) {
   return {
@@ -30,7 +31,7 @@ export async function GET(_: Request, { params }: { params: { id: string } }) {
   if (!departmentAccess.ok) return departmentAccess.response;
 const plan = await prisma.businessPlan.findUnique({
     where: { id: params.id },
-    include: { activities: { orderBy: { sortOrder: 'asc' } } }
+    include: { activities: { orderBy: { sortOrder: 'asc' }, include: { pillarFundingSplits: true } } }
   });
   if (!plan) return Response.json({ error: 'Business plan not found' }, { status: 404 });
   return Response.json(withSummary(plan));
@@ -72,6 +73,12 @@ export async function PUT(request: Request, { params }: { params: { id: string }
     existingCeilingAmount: existingPlan.ceilingAmount
   });
 
+  try {
+    await validatePillarFundingSplits(prisma, { fiscalYear: parsed.year, departmentId: targetDepartmentAccess.departmentId, activities: parsed.activities, existingPlanId: params.id });
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : 'Invalid Pillar Budget Allocation split.' }, { status: 400 });
+  }
+
   const plan = await prisma.$transaction(async (tx: any) => {
     await tx.activity.deleteMany({ where: { businessPlanId: params.id } });
     return tx.businessPlan.update({
@@ -88,10 +95,14 @@ export async function PUT(request: Request, { params }: { params: { id: string }
         departmentId: targetDepartmentAccess.departmentId || null,
         updatedById: auth.user.id,
         activities: {
-          create: parsed.activities.map((a, index) => ({ ...a, sortOrder: a.sortOrder || index + 1 }))
+          create: parsed.activities.map(({ pillarFundingSplits, ...activity }, index) => ({
+            ...activity,
+            sortOrder: activity.sortOrder || index + 1,
+            pillarFundingSplits: pillarFundingSplits.length ? { create: pillarFundingSplits } : undefined
+          }))
         }
       },
-      include: { activities: { orderBy: { sortOrder: 'asc' } } }
+      include: { activities: { orderBy: { sortOrder: 'asc' }, include: { pillarFundingSplits: true } } }
     });
   });
 
