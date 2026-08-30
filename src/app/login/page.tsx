@@ -43,7 +43,7 @@ export default function LoginPage() {
         <aside className="login-brand-panel">
           <div className="login-brand-mark">VNH</div>
           <div>
-            <p className="login-eyebrow">Vila Central Hospital</p>
+            <p className="login-eyebrow">Vanuatu National Hospital</p>
             <h1>Business Plan Control Platform</h1>
             <p className="login-brand-copy">
               Manage planning, approval workflow, budget controls, snapshots, exports,

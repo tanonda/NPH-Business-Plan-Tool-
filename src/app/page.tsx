@@ -20,6 +20,7 @@ import { ThemeToggle } from '@/components/ThemeToggle';
 import { EmergencyCareAlignmentPanel } from '@/components/EmergencyCareAlignmentPanel';
 import { StrategyWorkforcePanel } from '@/components/StrategyWorkforcePanel';
 import { DocumentImportPanel } from '@/components/DocumentImportPanel';
+import { GovernanceReviewHistoryPanel } from '@/components/GovernanceReviewHistoryPanel';
 import { canManageBudgetCeilings } from '@/lib/access-policy';
 
 type Status = 'DRAFT' | 'REVIEW' | 'RETURNED' | 'BUDGET_REVIEW' | 'FINANCE_REVIEW' | 'BUDGET_CLEARED' | 'APPROVED' | 'SUBMITTED' | 'EXECUTION' | 'REJECTED' | 'LOCKED';
@@ -664,6 +665,7 @@ export default function HomePage() {
         <NotificationsPanel mode="summary" />
         <EmergencyCareAlignmentPanel onStart2026Plan={startEmergencyCare2026Plan} canEditPlan={canEditPlan} />
         <DocumentImportPanel canManage={['ADMIN', 'PLANNER'].includes(role)} />
+        <GovernanceReviewHistoryPanel />
         <StrategyWorkforcePanel departments={departments} year={year} canManage={['ADMIN', 'PLANNER', 'APPROVER', 'REVIEWER', 'FINANCE', 'BUDGET_OFFICER'].includes(role)} />
         {canViewBudgetControl && <BudgetControlPanel selectedCostCenter={costCenter} year={year} />}
         {canViewAccounting && <AccountingDashboardPanel selectedCostCenter={costCenter} year={year} selectedPlanId={selectedPlanId} />}
